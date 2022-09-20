@@ -3,6 +3,16 @@
 A Dissect module implementing a parsers for various forensic evidence file containers, currently: AD1, ASDF and EWF. For
 more information, please see [the documentation](https://dissect.readthedocs.io/en/latest/projects/dissect.evidence).
 
+## Installation
+
+`dissect.evidence` is available on [PyPI](https://pypi.org/project/dissect.evidence/).
+
+```bash
+pip install dissect.evidence
+```
+
+This module is also automatically installed if you install the `dissect` package.
+
 ## Build and test instructions
 
 This project uses `tox` to build source and wheel distributions. Run the following command from the root folder to build
