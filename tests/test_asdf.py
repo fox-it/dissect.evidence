@@ -215,3 +215,39 @@ def test_asdf_stream_combined():
 
     assert stream.hexdigest() == "ba40ab3ee826d6aa0f085dfccbb72d8feefa72548015c4456c1fd741d0266a94"
     assert fh.getvalue() == bytes.fromhex("789c2b2e2a51284f2c56c8482d4a2d1e658fb247d9a3ec41cc06004445c530665f35fc")
+
+
+def test_asdf_scrape(asdf_writer: AsdfWriter):
+    asdf_writer.add_bytes(b"\x00" * 0x1000, idx=0, base=0)
+    asdf_writer.add_bytes(b"\x02" * 0x1000, idx=0, base=0x4000)
+    asdf_writer.add_bytes(b"\x04" * 0x1000, idx=0, base=0x8000)
+    asdf_writer.add_bytes(b"\x06" * 0x1000, idx=0, base=0x10000)
+    asdf_writer.add_bytes(b"\xff" * 0x1000, idx=0, base=0x14000)
+
+    # Don't close so we don't have a footer and block table
+    asdf_writer._fh.seek(0)
+
+    reader = AsdfSnapshot(asdf_writer._fh, recover=True)
+    stream = reader.open(0)
+
+    assert [(run_start, run_size) for run_start, run_size, _, _ in stream.table] == [
+        (0, 0x1000),
+        (0x4000, 0x1000),
+        (0x8000, 0x1000),
+        (0x10000, 0x1000),
+        (0x14000, 0x1000),
+    ]
+
+    assert stream.read() == b"".join(
+        [
+            (b"\x00" * 0x1000),
+            (b"\xa5\xdf" * (0x3000 // 2)),
+            (b"\x02" * 0x1000),
+            (b"\xa5\xdf" * (0x3000 // 2)),
+            (b"\x04" * 0x1000),
+            (b"\xa5\xdf" * (0x7000 // 2)),
+            (b"\x06" * 0x1000),
+            (b"\xa5\xdf" * (0x3000 // 2)),
+            (b"\xff" * 0x1000),
+        ]
+    )
