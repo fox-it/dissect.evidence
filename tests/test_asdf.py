@@ -5,6 +5,7 @@ import pytest
 
 from dissect.evidence.asdf.asdf import AsdfSnapshot, AsdfWriter
 from dissect.evidence.asdf.streams import CompressedStream, Crc32Stream, HashedStream
+from dissect.evidence.exceptions import InvalidSnapshot
 
 
 def test_asdf(asdf_writer: AsdfWriter):
@@ -227,6 +228,10 @@ def test_asdf_scrape(asdf_writer: AsdfWriter):
     # Don't close so we don't have a footer and block table
     asdf_writer._fh.seek(0)
 
+    with pytest.raises(InvalidSnapshot):
+        AsdfSnapshot(asdf_writer._fh)
+
+    asdf_writer._fh.seek(0)
     reader = AsdfSnapshot(asdf_writer._fh, recover=True)
     stream = reader.open(0)
 
