@@ -9,7 +9,7 @@ import tarfile
 import uuid
 from bisect import bisect_right
 from collections import defaultdict
-from typing import BinaryIO, Callable, Iterator, Optional, Tuple
+from typing import BinaryIO, Callable, Optional, Tuple
 
 from dissect import cstruct
 from dissect.util import ts
