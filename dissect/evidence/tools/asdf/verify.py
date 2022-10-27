@@ -1,49 +1,50 @@
 from __future__ import print_function
+
+import argparse
+import hashlib
 import io
 import sys
-import hashlib
-import argparse
 import traceback
-from zlib import crc32
 from contextlib import contextmanager
+from typing import BinaryIO, Iterator
+from zlib import crc32
 
 from dissect.util.stream import RangeStream
 
 from dissect.evidence.asdf import asdf
 
 
-def iterfileobj(src):
+def iter_fileobj(src: BinaryIO) -> Iterator[bytes]:
     buf = src.read(io.DEFAULT_BUFFER_SIZE)
     while buf:
         yield buf
         buf = src.read(io.DEFAULT_BUFFER_SIZE)
 
 
-def hashfileobj(src, alg="sha256"):
+def hash_fileobj(src: BinaryIO, alg: str = "sha256") -> bytes:
     ctx = hashlib.new(alg)
-    for buf in iterfileobj(src):
+    for buf in iter_fileobj(src):
         ctx.update(buf)
     return ctx.digest()
 
 
-def crc32filobj(src):
+def crc32_filobj(src: BinaryIO) -> int:
     crc = 0
-    for buf in iterfileobj(src):
+    for buf in iter_fileobj(src):
         crc = crc32(buf, crc) & 0xFFFFFFFF
     return crc
 
 
 @contextmanager
-def status(line):
+def status(line: str, verbose: bool = False) -> Iterator:
     TEMPLATE = "[{}] {:<50}{}"
     try:
         print(TEMPLATE.format("*", line, ""), end="\n")
         sys.stdout.flush()
         yield
-        # print(TEMPLATE.format('*', line, '[OK]'), end='\n')
     except Exception as e:
-        traceback.print_exc()
-        # print(TEMPLATE.format('!', line, '[ERR]'), end='\n')
+        if verbose:
+            traceback.print_exc()
         print(f"[!] {e}")
 
 
@@ -60,29 +61,30 @@ def main():
         footer = None
         footer_offset = 0
 
-        with status("Checking header"):
+        with status("Checking header", args.verbose):
             header = asdf.c_asdf.header(fh)
-            if header.magic != asdf.MAGIC:
+            if header.magic != asdf.FILE_MAGIC:
                 raise Exception("invalid header magic")
 
-        with status("Checking footer"):
+        with status("Checking footer", args.verbose):
             fh.seek(-len(asdf.c_asdf.footer), io.SEEK_END)
             footer_offset = fh.tell()
             footer = asdf.c_asdf.footer(fh)
             if footer.magic != asdf.FOOTER_MAGIC:
-                raise Exception("invalid footer magic")
+                footer = None
+                raise Exception("invalid footer magic, please run asdf-repair")
 
-        if not args.skip_hash:
-            with status("Checking file hash"):
+        if not args.skip_hash and footer:
+            with status("Checking file hash", args.verbose):
                 hashstream = RangeStream(fh, 0, footer_offset)
-                res = hashfileobj(hashstream)
+                res = hash_fileobj(hashstream)
                 if res != footer.sha256:
                     raise Exception("file hash doesn't match")
         else:
             print("[!] Skipping file hash")
 
-        if not args.skip_blocks:
-            with status("Checking blocks"):
+        if not args.skip_blocks and footer:
+            with status("Checking blocks", args.verbose):
                 table_size = (footer_offset - footer.table_offset) // len(asdf.c_asdf.table_entry)
                 fh.seek(footer.table_offset)
                 table = asdf.c_asdf.table_entry[table_size](fh)
@@ -100,7 +102,7 @@ def main():
                     target_crc = asdf.c_asdf.uint32(fh)
 
                     block_fh = RangeStream(fh, data_offset, entry.file_size - 4)
-                    crc = crc32filobj(block_fh)
+                    crc = crc32_filobj(block_fh)
                     if crc != target_crc:
                         print(f"[!] Block {i} crc32 doesn't match. Expected 0x{target_crc:x}, got 0x{crc:x}")
 
