@@ -379,6 +379,8 @@ class AsdfSnapshot:
         if self.footer.magic != FOOTER_MAGIC:
             raise InvalidSnapshot("invalid footer magic")
 
+        self._parse_block_table()
+
         self.metadata = Metadata(self)
 
     def _parse_block_table(self):
@@ -393,7 +395,6 @@ class AsdfSnapshot:
         for _ in range(table_count):
             entry = c_asdf.table_entry(table_data)
             self._table_insert(entry.idx, entry.offset, entry.size, entry.file_offset)
-
 
     def _table_insert(self, idx: int, offset: int, size: int, file_offset: int):
         stream_idx = idx
