@@ -1,8 +1,10 @@
+import zlib
 from io import BytesIO
 
 import pytest
 
 from dissect.evidence.asdf.asdf import AsdfSnapshot, AsdfWriter
+from dissect.evidence.asdf.streams import CompressedStream, Crc32Stream, HashedStream
 
 
 def noop():
@@ -144,3 +146,41 @@ def test_asdf_metadata():
 
     with pytest.raises(KeyError):
         reader.metadata.open("nonexistent")
+
+
+def test_asdf_stream_crc32():
+    fh = BytesIO()
+    stream = Crc32Stream(fh)
+    stream.write(b"srt was here")
+    stream.finalize()
+
+    assert fh.getvalue() == b"srt was here\x2f\x0e\x60\xa4"
+
+
+def test_asdf_stream_compressed():
+    fh = BytesIO()
+    stream = CompressedStream(fh)
+    stream.write(b"srt was here" * 100)
+    stream.finalize()
+
+    assert zlib.decompress(fh.getvalue()) == b"srt was here" * 100
+
+
+def test_asdf_stream_hashed():
+    fh = BytesIO()
+    stream = HashedStream(fh)
+    stream.write(b"srt was here")
+    assert stream.hexdigest() == "cd7bd850d261f8fa39a41d0963b42dae5f303615db19ac79e5044586d0825b7b"
+
+
+def test_asdf_stream_combined():
+    fh = BytesIO()
+    stream = Crc32Stream(fh)
+    stream = CompressedStream(stream)
+    stream = HashedStream(stream)
+
+    stream.write(b"srt was here" * 100)
+    stream.finalize()
+
+    assert stream.hexdigest() == "ba40ab3ee826d6aa0f085dfccbb72d8feefa72548015c4456c1fd741d0266a94"
+    assert fh.getvalue() == bytes.fromhex("789c2b2e2a51284f2c56c8482d4a2d1e658fb247d9a3ec41cc06004445c530665f35fc")
