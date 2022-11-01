@@ -132,8 +132,8 @@ class AsdfWriter(io.RawIOBase):
 
         self._write_header()
 
-    def add_metadata(self, path: str, fh: BinaryIO, size: Optional[int] = None) -> None:
-        """Add a file to the metadata.
+    def add_metadata_file(self, path: str, fh: BinaryIO, size: Optional[int] = None) -> None:
+        """Add a file to the metadata stream.
 
         Args:
             path: The path in the metadata tar to write to.
@@ -155,7 +155,9 @@ class AsdfWriter(io.RawIOBase):
         self._meta_tar.addfile(info, fh)
 
     def add_bytes(self, data: bytes, idx: int = 0, base: int = 0) -> None:
-        """Copy some bytes into this snapshot.
+        """Add some bytes into this snapshot.
+
+        Convenience method for adding some bytes at a specific offset.
 
         Args:
             data: The bytes to copy.

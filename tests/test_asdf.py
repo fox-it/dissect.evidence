@@ -132,8 +132,8 @@ def test_asdf_metadata():
 
     writer = AsdfWriter(fh)
 
-    writer.add_metadata("file", BytesIO(b"content"))
-    writer.add_metadata("dir/file", BytesIO(b"content here too"))
+    writer.add_metadata_file("file", BytesIO(b"content"))
+    writer.add_metadata_file("dir/file", BytesIO(b"content here too"))
 
     writer.close()
     fh.seek(0)
