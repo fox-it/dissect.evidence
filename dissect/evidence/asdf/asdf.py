@@ -385,7 +385,7 @@ class AsdfSnapshot:
 
         self.metadata = Metadata(self)
 
-    def _parse_block_table(self):
+    def _parse_block_table(self) -> None:
         """Parse the block table, getting rid of overlapping blocks."""
         table_offset = self.footer.table_offset
         table_size = self.footer_offset - table_offset
@@ -398,7 +398,7 @@ class AsdfSnapshot:
             entry = c_asdf.table_entry(table_data)
             self._table_insert(entry.idx, entry.offset, entry.size, entry.file_offset)
 
-    def _table_insert(self, idx: int, offset: int, size: int, file_offset: int):
+    def _table_insert(self, idx: int, offset: int, size: int, file_offset: int) -> None:
         stream_idx = idx
         entry_data_offset = file_offset + len(c_asdf.block)
 
