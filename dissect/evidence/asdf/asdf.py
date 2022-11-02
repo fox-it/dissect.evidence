@@ -586,7 +586,15 @@ class AsdfStream(AlignedStream):
         return b"".join(result)
 
 
-def scrape_blocks(fh: BinaryIO, buffer_size: int = io.DEFAULT_BUFFER_SIZE) -> Iterator[int]:
+def scrape_blocks(fh: BinaryIO, buffer_size: int = io.DEFAULT_BUFFER_SIZE) -> Iterator[cstruct.Instance, int]:
+    """Scrape for block headers in ``fh`` and yield parsed block headers and their offset.
+
+    Args:
+        fh: The file-like object to scrape for block headers.
+        buffer_size: The buffer size to use when scraping.
+    """
+    # If BLOCK_MAGIC is not found in the buffer (4 bytes), it's possible that part of it (up to 3 bytes) is in there
+    # Keep an overlap buffer of 3 bytes that we prepend to the current buffer so we can also find these partial needles
     overlap_len = len(BLOCK_MAGIC) - 1
     overlap = b"\x00" * overlap_len
     while True:
@@ -594,6 +602,7 @@ def scrape_blocks(fh: BinaryIO, buffer_size: int = io.DEFAULT_BUFFER_SIZE) -> It
         buf = fh.read(buffer_size)
         if not buf:
             break
+
         data = overlap + buf
         needle_pos = -1
         while True:
@@ -616,7 +625,9 @@ def scrape_blocks(fh: BinaryIO, buffer_size: int = io.DEFAULT_BUFFER_SIZE) -> It
             block_entry = c_asdf.block(block_buf)
             yield block_entry, offset
 
+        # Keep the last 3 bytes as overlap
         overlap = data[-overlap_len:]
+        # Consumer may seek the fh, so seek it back to where we were
         fh.seek(pos + len(buf))
 
 
