@@ -632,4 +632,8 @@ def _table_fit(
         # The next block overlaps with this block, so shrink this block
         entry_end = next_start
 
+    if entry_offset >= entry_end:
+        # Shouldn't be possible to go beyond the end, but we may end up with a 0 sized block
+        return None, None, None
+
     return table_idx, entry_offset, entry_end - entry_offset

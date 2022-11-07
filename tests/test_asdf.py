@@ -126,6 +126,57 @@ def test_asdf_overlap_all():
     assert stream.read() == (b"\x01" * 100) + (b"\x06" * 300)
 
 
+def test_asdf_overlap_contiguous():
+    fh = BytesIO()
+    fh.close = noop  # Prevent clearing the buffer, we need it
+
+    writer = AsdfWriter(fh)
+
+    writer.add_bytes(b"\x01" * 100, base=0)
+    writer.add_bytes(b"\x02" * 100, base=100)
+    assert writer._table_lookup[0] == [0, 100]
+
+    writer.add_bytes(b"\x03" * 75, base=50)
+    assert writer._table_lookup[0] == [0, 100]
+
+    writer.close()
+    fh.seek(0)
+
+    reader = AsdfSnapshot(fh)
+    stream = reader.open(0)
+
+    assert [(run_start, run_size) for run_start, run_size, _, _ in stream.table] == [
+        (0, 100),
+        (100, 100),
+    ]
+    assert stream.read() == (b"\x01" * 100) + (b"\x02" * 100)
+
+
+def test_asdf_overlap_seek():
+    fh = BytesIO()
+    fh.close = noop  # Prevent clearing the buffer, we need it
+
+    writer = AsdfWriter(fh)
+
+    writer.add_bytes(b"\x00" * 100, base=0)
+    writer.add_bytes(b"\x00" * 100, base=200)
+    writer.add_bytes(bytes(range(200)), base=50)
+    assert writer._table_lookup[0] == [0, 100, 200]
+
+    writer.close()
+    fh.seek(0)
+
+    reader = AsdfSnapshot(fh)
+    stream = reader.open(0)
+
+    assert [(run_start, run_size) for run_start, run_size, _, _ in stream.table] == [
+        (0, 100),
+        (100, 100),
+        (200, 100),
+    ]
+    assert stream.read() == (b"\x00" * 100) + bytes(range(50, 150)) + (b"\x00" * 100)
+
+
 def test_asdf_metadata():
     fh = BytesIO()
     fh.close = noop  # Prevent clearing the buffer, we need it
