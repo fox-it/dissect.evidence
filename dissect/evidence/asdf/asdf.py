@@ -505,7 +505,7 @@ class AsdfStream(AlignedStream):
         size = self.table[-1][0] + self.table[-1][1]
         super().__init__(size)
 
-    def _read(self, offset: int, length: int):
+    def _read(self, offset: int, length: int) -> bytes:
         r = []
 
         size = self.size
@@ -578,7 +578,9 @@ class AsdfStream(AlignedStream):
         return b"".join(r)
 
 
-def _table_fit(entry_offset: int, entry_size: int, entry_table: list, lookup_table: list, getentry: Callable):
+def _table_fit(
+    entry_offset: int, entry_size: int, entry_table: list, lookup_table: list, getentry: Callable
+) -> tuple[int, int, int]:
     """Calculate where to insert an entry with the given offset and size into the entry table.
 
     Moves or shrinks the entry to prevent block overlap, and remove any overlapping blocks.
