@@ -9,7 +9,7 @@ import tarfile
 import uuid
 from bisect import bisect_right
 from collections import defaultdict
-from typing import BinaryIO, Callable, Optional, Tuple
+from typing import BinaryIO, Callable, Optional
 
 from dissect import cstruct
 from dissect.util import ts
@@ -21,6 +21,8 @@ from dissect.evidence.exceptions import (
     InvalidSnapshot,
     UnsupportedVersion,
 )
+
+SnapshotTableEntry = tuple[int, int, int, int]
 
 VERSION = 1
 DEFAULT_BLOCK_SIZE = 4096
@@ -213,7 +215,7 @@ class AsdfWriter(io.RawIOBase):
     def copy_runlist(
         self,
         source: BinaryIO,
-        runlist: list[Tuple[Optional[int], int]],
+        runlist: list[tuple[Optional[int], int]],
         runlist_block_size: int,
         idx: int = 0,
         base: int = 0,
@@ -371,30 +373,28 @@ class AsdfSnapshot:
         self.timestamp = ts.from_unix(self.header.timestamp)
         self.guid = uuid.UUID(bytes_le=self.header.guid)
 
-        self.table: dict[list[Tuple[int, int, int, int]]] = defaultdict(list)
+        self.table: dict[list[SnapshotTableEntry]] = defaultdict(list)
         self._table_lookup: dict[list[int]] = defaultdict(list)
 
-        self.fh.seek(-len(c_asdf.footer), io.SEEK_END)
-        self.footer_offset = self.fh.tell()
+        footer_offset = self.fh.seek(-len(c_asdf.footer), io.SEEK_END)
 
         self.footer = c_asdf.footer(self.fh)
         if self.footer.magic != FOOTER_MAGIC:
             raise InvalidSnapshot("invalid footer magic")
 
-        self._parse_block_table()
+        self._parse_block_table(
+            self.footer.table_offset,
+            (footer_offset - self.footer.table_offset) // len(c_asdf.table_entry),
+        )
 
         self.metadata = Metadata(self)
 
-    def _parse_block_table(self) -> None:
+    def _parse_block_table(self, offset: int, count: int) -> None:
         """Parse the block table, getting rid of overlapping blocks."""
-        table_offset = self.footer.table_offset
-        table_size = self.footer_offset - table_offset
-        table_count = table_size // len(c_asdf.table_entry)
+        self.fh.seek(offset)
+        table_data = io.BytesIO(self.fh.read(count * len(c_asdf.table_entry)))
 
-        self.fh.seek(table_offset)
-        table_data = io.BytesIO(self.fh.read(table_size))
-
-        for _ in range(table_count):
+        for _ in range(count):
             entry = c_asdf.table_entry(table_data)
             self._table_insert(entry.idx, entry.offset, entry.size, entry.file_offset)
 
