@@ -177,6 +177,25 @@ def test_asdf_overlap_seek():
     assert stream.read() == (b"\x00" * 100) + bytes(range(50, 150)) + (b"\x00" * 100)
 
 
+def test_asdf_mid_run():
+    fh = BytesIO()
+    fh.close = noop  # Prevent clearing the buffer, we need it
+
+    writer = AsdfWriter(fh)
+
+    writer.add_bytes(bytes([v & 0xFF for v in range(4096)]), base=0)
+
+    writer.close()
+    fh.seek(0)
+
+    reader = AsdfSnapshot(fh)
+    stream = reader.open(0)
+    stream.align = 512
+
+    stream.seek(1100)
+    assert stream.read(512) == bytes([v & 0xFF for v in range(1100, 1100 + 512)])
+
+
 def test_asdf_metadata():
     fh = BytesIO()
     fh.close = noop  # Prevent clearing the buffer, we need it

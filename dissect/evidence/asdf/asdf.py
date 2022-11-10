@@ -13,7 +13,7 @@ from typing import BinaryIO, Callable, Optional, Tuple
 
 from dissect import cstruct
 from dissect.util import ts
-from dissect.util.stream import AlignedStream, RangeStream
+from dissect.util.stream import AlignedStream
 
 from dissect.evidence.asdf.streams import CompressedStream, Crc32Stream, HashedStream
 from dissect.evidence.exceptions import (
@@ -309,8 +309,8 @@ class AsdfWriter(io.RawIOBase):
         block.write(self.fh)
         data_offset = self.fh.tell()  # Block data location
 
-        source_stream = RangeStream(source, offset, size)
-        shutil.copyfileobj(source_stream, outfh)
+        source.seek(offset)
+        shutil.copyfileobj(source, outfh, size)
         # This writes any remaining data or footer for each block writer
         outfh.finalize()
 
@@ -512,7 +512,7 @@ class AsdfStream(AlignedStream):
         run_idx = bisect_right(self._table_lookup, offset) - 1
         runlist_len = len(self.table)
 
-        while length > 0 and run_idx < len(self.table):
+        while length > 0 and run_idx < runlist_len:
             run_start, run_size, run_file_offset, run_data_offset = self.table[run_idx]
             run_end = run_start + run_size
 
@@ -566,7 +566,7 @@ class AsdfStream(AlignedStream):
                     raise InvalidBlock("invalid block magic")
 
                 # Skip over block header
-                self.fh.seek(run_data_offset)
+                self.fh.seek(run_data_offset + run_pos)
                 r.append(self.fh.read(read_count))
 
                 # Proceed to next run
