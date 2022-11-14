@@ -1,6 +1,7 @@
+import argparse
 import io
 import sys
-import argparse
+from typing import BinaryIO
 
 from dissect.evidence.asdf import asdf
 
@@ -13,28 +14,35 @@ except ImportError:
 
 
 class Progress:
-    def __init__(self, size):
+    def __init__(self, size: int):
         self.size = size
         if HAS_TQDM:
             self.t = tqdm(total=size, unit="B", unit_scale=True)
 
-    def update(self, offset):
+    def update(self, offset: int) -> None:
         if HAS_TQDM:
             self.t.update(offset - self.t.n)
         else:
             sys.stderr.write(f"\r{offset / float(self.size) * 100:0.2f}%")
             sys.stderr.flush()
 
-    def close(self):
+    def close(self) -> None:
         if HAS_TQDM:
             self.t.close()
 
 
-def copystream(fhin, fhout, length):
+def copy_stream(fhin: BinaryIO, fhout: BinaryIO, length: int) -> None:
     n, remain = divmod(length, io.DEFAULT_BUFFER_SIZE)
     for _ in range(n):
         fhout.write(fhin.read(io.DEFAULT_BUFFER_SIZE))
     fhout.write(fhin.read(remain))
+
+
+def fill_zero(fhout: BinaryIO, length: int) -> None:
+    n, remain = divmod(length, io.DEFAULT_BUFFER_SIZE)
+    for _ in range(n):
+        fhout.write(b"\x00" * io.DEFAULT_BUFFER_SIZE)
+    fhout.write(b"\x00" * remain)
 
 
 def main():
@@ -42,14 +50,8 @@ def main():
     parser.add_argument("file", metavar="ASDF", help="ASDF file to dd")
     parser.add_argument("-w", "--writer", default="-", help="file to write to, default is stdout")
     parser.add_argument("-s", "--stream", type=int, default=0, help="stream index to dump (0-255)")
-    parser.add_argument(
-        "--fast", action="store_true", default=False, help="dump fast, fill sparse with null bytes instead"
-    )
     parser.add_argument("--no-tqdm", action="store_true", default=False, help="disable tqdm progress bar")
     args = parser.parse_args()
-
-    if args.fast and args.writer == "-":
-        parser.exit("--fast is not supported when writing to stdout")
 
     if args.no_tqdm:
         global HAS_TQDM
@@ -60,7 +62,7 @@ def main():
 
         if args.stream > 255 or not snapshot.contains(args.stream):
             parser.print_help()
-            print()
+            print(file=sys.stderr)
 
             valid_keys = ", ".join(str(i) for i in snapshot.table.keys())
             parser.exit(f"invalid stream index, must be one of {valid_keys}")
@@ -74,22 +76,17 @@ def main():
             fhout = open(args.writer, "wb")
 
         try:
-            if args.fast:
-                for entry in stream.table:
-                    stream.fh.seek(entry.file_offset + 24)
-                    fhout.seek(entry.offset)
-                    copystream(stream.fh, fhout, entry.size)
+            prev_offset = 0
+            for offset, size, _, data_offset in stream.table:
+                stream.fh.seek(data_offset)
+                if fhout.seekable():
+                    fhout.seek(offset)
+                else:
+                    fill_zero(fhout, offset - prev_offset)
+                copy_stream(stream.fh, fhout, size)
 
-                    progress.update(entry.offset)
-            else:
-                offset = 0
-                while True:
-                    buf = stream.read(io.DEFAULT_BUFFER_SIZE * 8)
-                    if not buf:
-                        break
-                    fhout.write(buf)
-                    progress.update(offset)
-                    offset += len(buf)
+                progress.update(offset)
+                prev_offset = offset
         except BrokenPipeError:
             pass
         finally:

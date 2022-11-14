@@ -1,7 +1,8 @@
-from dissect.evidence.asdf.asdf import AsdfStream, FILE_MAGIC, AsdfSnapshot
+from dissect.evidence.asdf.asdf import FILE_MAGIC, AsdfSnapshot, AsdfStream, AsdfWriter
 
 __all__ = [
+    "FILE_MAGIC",
     "AsdfSnapshot",
     "AsdfStream",
-    "FILE_MAGIC",
+    "AsdfWriter",
 ]

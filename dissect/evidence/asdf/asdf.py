@@ -1,22 +1,28 @@
 # Acquire Snapshot Data Format
 
-from __future__ import print_function
+from __future__ import annotations
 
-import io
 import gzip
-import uuid
+import io
 import shutil
 import tarfile
+import uuid
 from bisect import bisect_right
-from zlib import crc32
 from collections import defaultdict
+from typing import BinaryIO, Callable, Optional
 
 from dissect import cstruct
 from dissect.util import ts
-from dissect.util.stream import AlignedStream, RangeStream
+from dissect.util.stream import AlignedStream
 
-from dissect.evidence.exceptions import InvalidSnapshot, UnsupportedVersion, InvalidBlock
-from dissect.evidence.asdf.streams import HashedStream, CompressedStream, SubStreamBase
+from dissect.evidence.asdf.streams import CompressedStream, Crc32Stream, HashedStream
+from dissect.evidence.exceptions import (
+    InvalidBlock,
+    InvalidSnapshot,
+    UnsupportedVersion,
+)
+
+SnapshotTableEntry = tuple[int, int, int, int]
 
 VERSION = 1
 DEFAULT_BLOCK_SIZE = 4096
@@ -40,7 +46,6 @@ flag FILE_FLAG : uint32 {
 flag BLOCK_FLAG : uint8 {
     CRC32       = 0x01,
     COMPRESS    = 0x02,
-    SHADOW      = 0x04,
 };
 
 struct header {
@@ -58,18 +63,18 @@ struct block {
     BLOCK_FLAG  flags;          // Block flags
     uint8       idx;            // Stream index, some reserved values have special meaning
     char        reserved[2];    // Reserved
-    uint64      offset;         // Absolute disk offset
-    uint64      size;           // Size of block (on disk, not in file)
+    uint64      offset;         // Absolute offset of block in stream
+    uint64      size;           // Size of block in stream
 };
 
-struct table_entry = {
+struct table_entry {
     BLOCK_FLAG  flags;          // Block flags
     uint8       idx;            // Stream index, some reserved values have special meaning
     char        reserved[2];    // Reserved
-    uint64      offset;         // Absolute disk offset
-    uint64      size;           // Size of block (on disk, not in file)
-    uint64      file_offset;    // Offset in file to this block
-    uint64      file_size;      // Size of block in this file
+    uint64      offset;         // Absolute offset of block in stream
+    uint64      size;           // Size of block in stream
+    uint64      file_offset;    // Absolute offset of block in file
+    uint64      file_size;      // Size of block in file
 };
 
 struct footer {
@@ -90,24 +95,23 @@ class AsdfWriter(io.RawIOBase):
         - Maximum source disk size is ~16EiB
         - Maximum number of disks is 254
 
-    There's no cleverness here. Just writing blocks. We don't sort/"defrag"
-    or prevent dupes on purpose. This is to make the process of writing
-    these files as "lightweight" as possible. The decision to offload all
-    heavy lifting to the readers is because writers are usually low power
-    clients, whereas the readers are usually high power servers.
-
     Some things are currently hardcoded (like SHA256), although they may
     become variable in the future.
 
     Args:
         fh: File-like object to write to.
         guid: Unique identifier. Used to link images to writers.
-        block_size: The block size to use for storing data.
+        compress: Write gzip compressed file.
         block_crc: Flag to store a CRC32 after each block.
-        block_compress: Flag to compress blocks using zlib.
     """
 
-    def __init__(self, fh, guid=None, compress=False, block_crc=True):
+    def __init__(
+        self,
+        fh: BinaryIO,
+        guid: uuid.UUID = None,
+        compress: bool = False,
+        block_crc: bool = True,
+    ):
         self._fh = fh
         self.fh = self._fh
 
@@ -119,9 +123,10 @@ class AsdfWriter(io.RawIOBase):
 
         # Options
         self.block_crc = block_crc
-        self.block_compress = False  # Hard code this for now
+        self.block_compress = False  # Disabled for now
 
-        self._table = []
+        self._table = defaultdict(list)
+        self._table_lookup = defaultdict(list)
         self._table_offset = 0
 
         self._meta_buf = io.BytesIO()
@@ -129,7 +134,14 @@ class AsdfWriter(io.RawIOBase):
 
         self._write_header()
 
-    def add_metadata(self, path, fh, size=None):
+    def add_metadata_file(self, path: str, fh: BinaryIO, size: Optional[int] = None) -> None:
+        """Add a file to the metadata stream.
+
+        Args:
+            path: The path in the metadata tar to write to.
+            fh: The file-like object to write.
+            size: Optional size to write.
+        """
         info = self._meta_tar.tarinfo()
         info.name = path
         info.uname = "root"
@@ -144,13 +156,25 @@ class AsdfWriter(io.RawIOBase):
         fh.seek(0)
         self._meta_tar.addfile(info, fh)
 
-    def copy_bytes(self, source, offset, num_bytes, idx=0, base=0):
+    def add_bytes(self, data: bytes, idx: int = 0, base: int = 0) -> None:
+        """Add some bytes into this snapshot.
+
+        Convenience method for adding some bytes at a specific offset.
+
+        Args:
+            data: The bytes to copy.
+            idx: The stream index.
+            base: The base offset.
+        """
+        self._write_block(io.BytesIO(data), 0, len(data), idx=idx, base=base)
+
+    def copy_bytes(self, source: BinaryIO, offset: int, num_bytes: int, idx: int = 0, base: int = 0) -> None:
         """Copy some bytes from the source file-like object into this snapshot.
 
         Often the source will be a volume on a disk, which is usually represented
-        as a relative stream. If this is the case, use the `base` argument to
+        as a relative stream. If this is the case, use the ``base`` argument to
         indicate what the byte offset of the source is, relative to the start
-        of the disk. The `offset` argument is always the offset in the
+        of the disk. The ``offset`` argument is always the offset in the
         source, so that is not affected.
 
         Args:
@@ -158,16 +182,24 @@ class AsdfWriter(io.RawIOBase):
             offset: The byte offset into the source to start copying bytes from.
             num_bytes: The amount of bytes to copy.
             idx: The stream index, if copying from multiple disks.
-            base: The base offset, if the source is a relative stream from a disk.
+            base: The base offset, if the source is a relative stream from e.g. a disk.
         """
         self._write_block(source, offset, num_bytes, idx=idx, base=base)
 
-    def copy_block(self, source, offset, num_blocks, block_size=None, idx=0, base=0):
+    def copy_block(
+        self,
+        source: BinaryIO,
+        offset: int,
+        num_blocks: int,
+        block_size: Optional[int] = None,
+        idx: int = 0,
+        base: int = 0,
+    ) -> None:
         """Copy some blocks in the given block size into this snapshot.
 
         If no block size is given, the ASDF native block size is used.
         This is really just a convenience method that does the block multiplication
-        before calling `copy_bytes`.
+        before calling ``copy_bytes``.
 
         Args:
             source: The source file-like object to copy the blocks from.
@@ -175,12 +207,19 @@ class AsdfWriter(io.RawIOBase):
             num_blocks: The amount of blocks to copy.
             block_size: The size of each block.
             idx: The stream index, if copying from multiple disks.
-            base: The base offset, if the source is a relative stream from a disk.
+            base: The base offset, if the source is a relative stream from e.g. a disk.
         """
         block_size = block_size or DEFAULT_BLOCK_SIZE
         return self.copy_bytes(source, offset, num_blocks * block_size, idx, base)
 
-    def copy_runlist(self, source, runlist, runlist_block_size, idx=0, base=0):
+    def copy_runlist(
+        self,
+        source: BinaryIO,
+        runlist: list[tuple[Optional[int], int]],
+        runlist_block_size: int,
+        idx: int = 0,
+        base: int = 0,
+    ) -> None:
         """Copy a runlist of blocks in the given block size into this snapshot.
 
         A runlist must be a list of tuples, where:
@@ -194,7 +233,7 @@ class AsdfWriter(io.RawIOBase):
             runlist: The runlist that describes the blocks.
             runlist_block_size: The size of each block.
             idx: The stream index, if copying from multiple disks.
-            base: The base offset, if the source is a relative stream from a disk.
+            base: The base offset, if the source is a relative stream from e.g. a disk.
         """
         for run_offset, run_length in runlist:
             # If run_offset is None, it's a sparse run
@@ -204,7 +243,7 @@ class AsdfWriter(io.RawIOBase):
             # Save a function call by directly calling copy_bytes instead of copy_block.
             self.copy_bytes(source, run_offset * runlist_block_size, run_length * runlist_block_size, idx, base)
 
-    def close(self):
+    def close(self) -> None:
         """Close the ASDF file.
 
         Writes the block table and footer, then closes the destination file-like object.
@@ -216,7 +255,7 @@ class AsdfWriter(io.RawIOBase):
         self._write_footer()
         self.fh.close()
 
-    def _write_header(self):
+    def _write_header(self) -> None:
         """Write the ASDF header to the destination file-like object."""
         header = c_asdf.header(
             magic=FILE_MAGIC,
@@ -227,7 +266,7 @@ class AsdfWriter(io.RawIOBase):
         )
         header.write(self.fh)
 
-    def _write_block(self, source, offset, size, idx=0, base=0):
+    def _write_block(self, source: BinaryIO, offset: int, size: int, idx: int = 0, base: int = 0) -> None:
         """Write an ASDF block to the destination file-like object.
 
         Args:
@@ -237,6 +276,20 @@ class AsdfWriter(io.RawIOBase):
             idx: The stream index, if copying from multiple disks.
             base: The base offset, if the source is a relative stream from a disk.
         """
+        absolute_offset = base + offset
+
+        lookup_table = self._table_lookup[idx]
+        entry_table = self._table[idx]
+
+        table_idx, absolute_offset, size = _table_fit(
+            absolute_offset, size, entry_table, lookup_table, lambda e: (e[2], e[3])
+        )
+
+        if table_idx is None:
+            return
+
+        offset = absolute_offset - base
+
         # Setup the block flags and block writer
         flags = 0
         outfh = self.fh
@@ -248,7 +301,6 @@ class AsdfWriter(io.RawIOBase):
             flags |= c_asdf.BLOCK_FLAG.COMPRESS
 
         block_offset = self.fh.tell()  # Block header location
-        absolute_offset = base + offset
         block = c_asdf.block(
             magic=BLOCK_MAGIC,
             flags=flags,
@@ -259,36 +311,40 @@ class AsdfWriter(io.RawIOBase):
         block.write(self.fh)
         data_offset = self.fh.tell()  # Block data location
 
-        source_stream = RangeStream(source, offset, size)
-        shutil.copyfileobj(source_stream, outfh)
+        source.seek(offset)
+        shutil.copyfileobj(source, outfh, size)
         # This writes any remaining data or footer for each block writer
         outfh.finalize()
 
         data_size = self.fh.tell() - data_offset
-        self._table.append((flags, idx, absolute_offset, size, block_offset, data_size))
 
-    def _write_meta(self):
+        lookup_table.insert(table_idx, absolute_offset)
+        entry_table.insert(table_idx, (flags, idx, absolute_offset, size, block_offset, data_size))
+
+    def _write_meta(self) -> None:
+        """Write the metadata tar to the destination file-like object."""
         self._meta_tar.close()
 
         size = self._meta_buf.tell()
         self._meta_buf.seek(0)
         self.copy_bytes(self._meta_buf, 0, size, idx=IDX_METADATA)
 
-    def _write_table(self):
+    def _write_table(self) -> None:
         """Write the ASDF block table to the destination file-like object."""
         self._table_offset = self.fh.tell()
-        for flags, idx, offset, size, file_offset, file_size in self._table:
-            table_entry = c_asdf.table_entry(
-                flags=flags,
-                idx=idx,
-                offset=offset,
-                size=size,
-                file_offset=file_offset,
-                file_size=file_size,
-            )
-            table_entry.write(self.fh)
+        for stream_table in self._table.values():
+            for flags, idx, offset, size, file_offset, file_size in stream_table:
+                table_entry = c_asdf.table_entry(
+                    flags=flags,
+                    idx=idx,
+                    offset=offset,
+                    size=size,
+                    file_offset=file_offset,
+                    file_size=file_size,
+                )
+                table_entry.write(self.fh)
 
-    def _write_footer(self):
+    def _write_footer(self) -> None:
         """Write the ASDF footer to the destination file-like object."""
         footer = c_asdf.footer(
             magic=FOOTER_MAGIC,
@@ -305,7 +361,7 @@ class AsdfSnapshot:
         fh: File-like object to read the ASDF file from.
     """
 
-    def __init__(self, fh):
+    def __init__(self, fh: BinaryIO):
         self.fh = fh
         self.header = c_asdf.header(fh)
         if self.header.magic != FILE_MAGIC:
@@ -314,32 +370,62 @@ class AsdfSnapshot:
         if self.header.version > VERSION:
             raise UnsupportedVersion("higher version")
 
-        self.fh.seek(-len(c_asdf.footer), io.SEEK_END)
-        footer_offset = self.fh.tell()
+        self.timestamp = ts.from_unix(self.header.timestamp)
+        self.guid = uuid.UUID(bytes_le=self.header.guid)
+
+        self.table: dict[list[SnapshotTableEntry]] = defaultdict(list)
+        self._table_lookup: dict[list[int]] = defaultdict(list)
+
+        footer_offset = self.fh.seek(-len(c_asdf.footer), io.SEEK_END)
 
         self.footer = c_asdf.footer(self.fh)
         if self.footer.magic != FOOTER_MAGIC:
             raise InvalidSnapshot("invalid footer magic")
 
-        self.timestamp = ts.from_unix(self.header.timestamp)
-        self.guid = uuid.UUID(bytes_le=self.header.guid)
-        self.table = defaultdict(list)
-        self._table_lookup = defaultdict(list)
-
-        table_offset = self.footer.table_offset
-        table_size = (footer_offset - table_offset) // len(c_asdf.table_entry)
-
-        self.fh.seek(table_offset)
-        for _ in range(table_size):
-            entry = c_asdf.table_entry(self.fh)
-            stream_idx = entry.idx
-            lookup_idx = bisect_right(self._table_lookup[stream_idx], entry.offset)
-            self._table_lookup[stream_idx].insert(lookup_idx, entry.offset)
-            self.table[stream_idx].insert(lookup_idx, entry)
+        self._parse_block_table(
+            self.footer.table_offset,
+            (footer_offset - self.footer.table_offset) // len(c_asdf.table_entry),
+        )
 
         self.metadata = Metadata(self)
 
-    def contains(self, idx):
+    def _parse_block_table(self, offset: int, count: int) -> None:
+        """Parse the block table, getting rid of overlapping blocks."""
+        self.fh.seek(offset)
+        table_data = io.BytesIO(self.fh.read(count * len(c_asdf.table_entry)))
+
+        for _ in range(count):
+            entry = c_asdf.table_entry(table_data)
+            self._table_insert(entry.idx, entry.offset, entry.size, entry.file_offset)
+
+    def _table_insert(self, idx: int, offset: int, size: int, file_offset: int) -> None:
+        stream_idx = idx
+        entry_data_offset = file_offset + len(c_asdf.block)
+
+        lookup_table = self._table_lookup[stream_idx]
+        entry_table = self.table[stream_idx]
+
+        table_idx, entry_offset, entry_size = _table_fit(
+            offset, size, entry_table, lookup_table, lambda e: (e[0], e[1])
+        )
+
+        if table_idx is None:
+            return
+
+        entry_data_offset += entry_offset - offset
+
+        lookup_table.insert(table_idx, entry_offset)
+        entry_table.insert(
+            table_idx,
+            (
+                entry_offset,
+                entry_size,
+                file_offset,
+                entry_data_offset,
+            ),
+        )
+
+    def contains(self, idx: int) -> bool:
         """Check whether this file contains the given stream index.
 
         Args:
@@ -347,7 +433,7 @@ class AsdfSnapshot:
         """
         return idx in self.table
 
-    def open(self, idx):
+    def open(self, idx: int) -> AsdfStream:
         """Open a specific stream in the file.
 
         Args:
@@ -357,12 +443,12 @@ class AsdfSnapshot:
             raise IndexError(f"invalid stream idx: {idx}")
         return AsdfStream(self, idx)
 
-    def streams(self):
+    def streams(self) -> AsdfStream:
         """Iterate over all streams in the file."""
         for i in sorted(self.table.keys()):
             yield self.open(i)
 
-    def disks(self):
+    def disks(self) -> AsdfStream:
         """Iterate over all non-reserved streams in the file."""
         for i in sorted(self.table.keys()):
             if i in RESERVED_IDX:
@@ -371,32 +457,43 @@ class AsdfSnapshot:
 
 
 class Metadata:
-    def __init__(self, asdf):
+    """ASDF metadata reader.
+
+    Thin wrapper around ``tarfile``.
+
+    Args:
+        asdf: The :class:`AsdfSnapshot` to open the metadata of.
+    """
+
+    def __init__(self, asdf: AsdfSnapshot):
         self.tar = None
         if IDX_METADATA in asdf.table:
             self.tar = tarfile.open(fileobj=asdf.open(IDX_METADATA), mode="r")
 
-    def names(self):
+    def names(self) -> list[str]:
+        """Return all metadata file entries."""
         return self.tar.getnames() if self.tar else []
 
-    def members(self):
+    def members(self) -> list[tarfile.TarInfo]:
+        """Return all metadata :class:`tarfile.TarInfo` entries."""
         return self.tar.getmembers() if self.tar else []
 
-    def open(self, path):
+    def open(self, path: str) -> BinaryIO:
+        """Open a metadata entry and return a binary file-like object."""
         if self.tar:
             return self.tar.extractfile(path)
         raise KeyError(f"filename '{path}' not found")
 
 
 class AsdfStream(AlignedStream):
-    """Asdf stream from a snapshot.
+    """ASDF stream from a snapshot.
 
     Args:
-        asdf: AsdfFile parent object.
-        idx: Stream index in the AsdfFile.
+        asdf: :class:`AsdfSnapshot` parent object.
+        idx: Stream index in the :class:`AsdfSnapshot`.
     """
 
-    def __init__(self, asdf, idx):
+    def __init__(self, asdf: AsdfSnapshot, idx: int):
         self.fh = asdf.fh
         self.asdf = asdf
         self.idx = idx
@@ -405,44 +502,49 @@ class AsdfStream(AlignedStream):
 
         # We don't actually know the size of the source disk
         # Doesn't really matter though, just take the last run offset + size
-        size = self.table[-1].offset + self.table[-1].size
+        size = self.table[-1][0] + self.table[-1][1]
         super().__init__(size)
 
-    def _read(self, offset, length):
-        r = []
+    def _read(self, offset: int, length: int) -> bytes:
+        result = []
 
         size = self.size
         run_idx = bisect_right(self._table_lookup, offset) - 1
         runlist_len = len(self.table)
 
-        while length > 0 and run_idx < len(self.table):
+        while length > 0 and run_idx < runlist_len:
+            run_start, run_size, run_file_offset, run_data_offset = self.table[run_idx]
+            run_end = run_start + run_size
 
-            run = self.table[run_idx]
-            next_run = self.table[run_idx + 1] if run_idx + 1 < runlist_len else None
-
-            run_start = run.offset
-            run_end = run_start + run.size
+            if run_idx + 1 < runlist_len:
+                next_run_start, _, _, _ = self.table[run_idx + 1]
+            else:
+                next_run_start = None
 
             if run_idx < 0:
                 # Missing first block
-                if not next_run:
+                if next_run_start is None:
                     break
 
-                sparse_remaining = next_run.offset - offset
+                sparse_remaining = next_run_start - offset
 
                 read_count = min(size - offset, min(sparse_remaining, length))
-                r.append(SPARSE_BYTES * (read_count // len(SPARSE_BYTES)))
+                result.append(SPARSE_BYTES * (read_count // len(SPARSE_BYTES)))
 
                 # Proceed to next run
                 run_idx += 1
             elif run_end <= offset:
                 # Start outside of run bounds
-                sparse_size = next_run.offset - run_end
+                if next_run_start is None:
+                    # No next run to sparse read to
+                    break
+
+                sparse_size = next_run_start - run_end
                 sparse_pos = offset - run_end
                 sparse_remaining = sparse_size - sparse_pos
 
                 read_count = min(size - offset, min(sparse_remaining, length))
-                r.append(SPARSE_BYTES * (read_count // len(SPARSE_BYTES)))
+                result.append(SPARSE_BYTES * (read_count // len(SPARSE_BYTES)))
 
                 # Proceed to next run
                 run_idx += 1
@@ -450,48 +552,88 @@ class AsdfStream(AlignedStream):
                 # Previous run consumed, and next run is far away
                 sparse_remaining = run_start - offset
                 read_count = min(size - offset, min(sparse_remaining, length))
-                r.append(SPARSE_BYTES * (read_count // len(SPARSE_BYTES)))
-            else:
-                run_pos = offset - run_start
-                run_remaining = run.size - run_pos
-                read_count = min(size - offset, min(run_remaining, length))
-                self.fh.seek(run.file_offset)
+                result.append(SPARSE_BYTES * (read_count // len(SPARSE_BYTES)))
 
-                block_header = c_asdf.block(self.fh)
-                if block_header.magic != BLOCK_MAGIC:
+                # Don't proceed to next run, next loop iteration we'll be within the current run
+            else:
+                # We're in a run with data
+                run_pos = offset - run_start
+                run_remaining = run_size - run_pos
+                read_count = min(size - offset, min(run_remaining, length))
+
+                self.fh.seek(run_file_offset)
+                if self.fh.read(4) != BLOCK_MAGIC:
                     raise InvalidBlock("invalid block magic")
 
-                self.fh.seek(run_pos, io.SEEK_CUR)
-                r.append(self.fh.read(read_count))
+                # Skip over block header
+                self.fh.seek(run_data_offset + run_pos)
+                result.append(self.fh.read(read_count))
 
+                # Proceed to next run
                 run_idx += 1
 
             offset += read_count
             length -= read_count
 
-        return b"".join(r)
+        return b"".join(result)
 
 
-class Crc32Stream(SubStreamBase):
-    """Compute a CRC32 over all written data.
+def _table_fit(
+    entry_offset: int, entry_size: int, entry_table: list, lookup_table: list, getentry: Callable
+) -> tuple[int, int, int]:
+    """Calculate where to insert an entry with the given offset and size into the entry table.
 
-    This assumes that all data is written as a continuous stream.
+    Moves or shrinks the entry to prevent block overlap, and remove any overlapping blocks.
 
     Args:
-        fh: The file-like object to wrap.
+        entry_offset: The entry offset to calculate the insert for.
+        entry_size: The entry size to calculate the insert for.
+        entry_table: The entry table to insert into or remove entries from.
+        lookup_table: The lookup table for the entry_table.
+        getentry: A callable to return the ``(offset, size)`` tuple from an entry.
+
+    Returns:
+        A tuple of the table index to insert into, an adjusted entry offset and an adjusted entry size.
     """
+    entry_end = entry_offset + entry_size
 
-    def __init__(self, fh):
-        super().__init__(fh)
-        self.crc = 0
+    prev_end = None
+    next_start = None
+    next_end = None
 
-    def write(self, b):
-        self.crc = crc32(b, self.crc) & 0xFFFFFFFF
-        return self.fh.write(b)
+    table_idx = bisect_right(lookup_table, entry_offset)
+    if table_idx > 0:
+        prev_start, prev_size = getentry(entry_table[table_idx - 1])
+        prev_end = prev_start + prev_size
+    if table_idx < len(lookup_table):
+        next_start, next_size = getentry(entry_table[table_idx])
+        next_end = next_start + next_size
 
-    def digest(self):
-        return self.crc
+    if prev_end and prev_end >= entry_end:
+        # This block is fully contained in the previous block
+        return None, None, None
 
-    def finalize(self):
-        c_asdf.uint32.write(self.fh, self.digest())
-        self.fh.finalize()
+    if prev_end and prev_end > entry_offset:
+        # The start of this block overlaps with the previous, so shrink this block
+        entry_offset = prev_end
+
+    # We may completely overlap one or more next entries
+    while next_end and next_end <= entry_end:
+        lookup_table.pop(table_idx)
+        entry_table.pop(table_idx)
+
+        if table_idx < len(lookup_table):
+            next_start, next_size = getentry(entry_table[table_idx])
+            next_end = next_start + next_size
+        else:
+            next_start, next_end = None, None
+
+    if next_start and next_start < entry_end < next_end:
+        # The next block overlaps with this block, so shrink this block
+        entry_end = next_start
+
+    if entry_offset >= entry_end:
+        # Shouldn't be possible to go beyond the end, but we may end up with a 0 sized block
+        return None, None, None
+
+    return table_idx, entry_offset, entry_end - entry_offset
