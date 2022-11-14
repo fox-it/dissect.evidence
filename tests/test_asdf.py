@@ -7,32 +7,23 @@ from dissect.evidence.asdf.asdf import AsdfSnapshot, AsdfWriter
 from dissect.evidence.asdf.streams import CompressedStream, Crc32Stream, HashedStream
 
 
-def noop():
-    pass
+def test_asdf(asdf_writer: AsdfWriter):
+    asdf_writer.add_bytes(b"\x00" * 0x1000, idx=0, base=0)
+    asdf_writer.add_bytes(b"\x02" * 0x1000, idx=0, base=0x4000)
+    asdf_writer.add_bytes(b"\x04" * 0x1000, idx=0, base=0x8000)
+    asdf_writer.add_bytes(b"\x06" * 0x1000, idx=0, base=0x10000)
+    asdf_writer.add_bytes(b"\xff" * 0x1000, idx=0, base=0x14000)
 
+    asdf_writer.add_bytes(b"\x08" * 0x1000, idx=1, base=0x2000)
+    asdf_writer.add_bytes(b"\x10" * 0x1000, idx=1, base=0x5000)
+    asdf_writer.add_bytes(b"\x12" * 0x1000, idx=1, base=0x8000)
+    asdf_writer.add_bytes(b"\x14" * 0x1000, idx=1, base=0xB000)
+    asdf_writer.add_bytes(b"\xff" * 0x1000, idx=1, base=0xE000)
 
-def test_asdf():
-    fh = BytesIO()
-    fh.close = noop  # Prevent clearing the buffer, we need it
+    asdf_writer.close()
+    asdf_writer._fh.seek(0)
 
-    writer = AsdfWriter(fh)
-
-    writer.add_bytes(b"\x00" * 0x1000, idx=0, base=0)
-    writer.add_bytes(b"\x02" * 0x1000, idx=0, base=0x4000)
-    writer.add_bytes(b"\x04" * 0x1000, idx=0, base=0x8000)
-    writer.add_bytes(b"\x06" * 0x1000, idx=0, base=0x10000)
-    writer.add_bytes(b"\xff" * 0x1000, idx=0, base=0x14000)
-
-    writer.add_bytes(b"\x08" * 0x1000, idx=1, base=0x2000)
-    writer.add_bytes(b"\x10" * 0x1000, idx=1, base=0x5000)
-    writer.add_bytes(b"\x12" * 0x1000, idx=1, base=0x8000)
-    writer.add_bytes(b"\x14" * 0x1000, idx=1, base=0xB000)
-    writer.add_bytes(b"\xff" * 0x1000, idx=1, base=0xE000)
-
-    writer.close()
-    fh.seek(0)
-
-    reader = AsdfSnapshot(fh)
+    reader = AsdfSnapshot(asdf_writer._fh)
     stream_0 = reader.open(0)
     assert [(run_start, run_size) for run_start, run_size, _, _ in stream_0.table] == [
         (0, 0x1000),
@@ -65,29 +56,24 @@ def test_asdf():
     assert stream_1.read(0x4000) == (b"\xa5\xdf" * (0x2000 // 2)) + (b"\x08" * 0x1000) + (b"\xa5\xdf" * (0x1000 // 2))
 
 
-def test_asdf_overlap():
-    fh = BytesIO()
-    fh.close = noop  # Prevent clearing the buffer, we need it
+def test_asdf_overlap(asdf_writer: AsdfWriter):
+    asdf_writer.add_bytes(b"\x01" * 100, base=0)
+    asdf_writer.add_bytes(b"\x02" * 100, base=200)
+    assert asdf_writer._table_lookup[0] == [0, 200]
 
-    writer = AsdfWriter(fh)
+    asdf_writer.add_bytes(b"\x03" * 100, base=50)
+    assert asdf_writer._table_lookup[0] == [0, 100, 200]
 
-    writer.add_bytes(b"\x01" * 100, base=0)
-    writer.add_bytes(b"\x02" * 100, base=200)
-    assert writer._table_lookup[0] == [0, 200]
+    asdf_writer.add_bytes(b"\x04" * 150, base=100)
+    assert asdf_writer._table_lookup[0] == [0, 100, 150, 200]
 
-    writer.add_bytes(b"\x03" * 100, base=50)
-    assert writer._table_lookup[0] == [0, 100, 200]
+    asdf_writer.add_bytes(b"\x05" * 50, base=25)
+    assert asdf_writer._table_lookup[0] == [0, 100, 150, 200]
 
-    writer.add_bytes(b"\x04" * 150, base=100)
-    assert writer._table_lookup[0] == [0, 100, 150, 200]
+    asdf_writer.close()
+    asdf_writer._fh.seek(0)
 
-    writer.add_bytes(b"\x05" * 50, base=25)
-    assert writer._table_lookup[0] == [0, 100, 150, 200]
-
-    writer.close()
-    fh.seek(0)
-
-    reader = AsdfSnapshot(fh)
+    reader = AsdfSnapshot(asdf_writer._fh)
     stream = reader.open(0)
 
     assert [(run_start, run_size) for run_start, run_size, _, _ in stream.table] == [
@@ -99,24 +85,19 @@ def test_asdf_overlap():
     assert stream.read() == (b"\x01" * 100) + (b"\x03" * 50) + (b"\x04" * 50) + (b"\x02" * 100)
 
 
-def test_asdf_overlap_all():
-    fh = BytesIO()
-    fh.close = noop  # Prevent clearing the buffer, we need it
+def test_asdf_overlap_all(asdf_writer: AsdfWriter):
+    asdf_writer.add_bytes(b"\x01" * 100, base=0)
+    asdf_writer.add_bytes(b"\x02" * 100, base=200)
+    asdf_writer.add_bytes(b"\x03" * 100, base=50)
+    asdf_writer.add_bytes(b"\x04" * 150, base=100)
+    assert asdf_writer._table_lookup[0] == [0, 100, 150, 200]
+    asdf_writer.add_bytes(b"\x06" * 400, base=0)
+    assert asdf_writer._table_lookup[0] == [0, 100]
 
-    writer = AsdfWriter(fh)
+    asdf_writer.close()
+    asdf_writer._fh.seek(0)
 
-    writer.add_bytes(b"\x01" * 100, base=0)
-    writer.add_bytes(b"\x02" * 100, base=200)
-    writer.add_bytes(b"\x03" * 100, base=50)
-    writer.add_bytes(b"\x04" * 150, base=100)
-    assert writer._table_lookup[0] == [0, 100, 150, 200]
-    writer.add_bytes(b"\x06" * 400, base=0)
-    assert writer._table_lookup[0] == [0, 100]
-
-    writer.close()
-    fh.seek(0)
-
-    reader = AsdfSnapshot(fh)
+    reader = AsdfSnapshot(asdf_writer._fh)
     stream = reader.open(0)
 
     assert [(run_start, run_size) for run_start, run_size, _, _ in stream.table] == [
@@ -126,23 +107,18 @@ def test_asdf_overlap_all():
     assert stream.read() == (b"\x01" * 100) + (b"\x06" * 300)
 
 
-def test_asdf_overlap_contiguous():
-    fh = BytesIO()
-    fh.close = noop  # Prevent clearing the buffer, we need it
+def test_asdf_overlap_contiguous(asdf_writer: AsdfWriter):
+    asdf_writer.add_bytes(b"\x01" * 100, base=0)
+    asdf_writer.add_bytes(b"\x02" * 100, base=100)
+    assert asdf_writer._table_lookup[0] == [0, 100]
 
-    writer = AsdfWriter(fh)
+    asdf_writer.add_bytes(b"\x03" * 75, base=50)
+    assert asdf_writer._table_lookup[0] == [0, 100]
 
-    writer.add_bytes(b"\x01" * 100, base=0)
-    writer.add_bytes(b"\x02" * 100, base=100)
-    assert writer._table_lookup[0] == [0, 100]
+    asdf_writer.close()
+    asdf_writer._fh.seek(0)
 
-    writer.add_bytes(b"\x03" * 75, base=50)
-    assert writer._table_lookup[0] == [0, 100]
-
-    writer.close()
-    fh.seek(0)
-
-    reader = AsdfSnapshot(fh)
+    reader = AsdfSnapshot(asdf_writer._fh)
     stream = reader.open(0)
 
     assert [(run_start, run_size) for run_start, run_size, _, _ in stream.table] == [
@@ -152,21 +128,16 @@ def test_asdf_overlap_contiguous():
     assert stream.read() == (b"\x01" * 100) + (b"\x02" * 100)
 
 
-def test_asdf_overlap_seek():
-    fh = BytesIO()
-    fh.close = noop  # Prevent clearing the buffer, we need it
+def test_asdf_overlap_seek(asdf_writer: AsdfWriter):
+    asdf_writer.add_bytes(b"\x00" * 100, base=0)
+    asdf_writer.add_bytes(b"\x00" * 100, base=200)
+    asdf_writer.add_bytes(bytes(range(200)), base=50)
+    assert asdf_writer._table_lookup[0] == [0, 100, 200]
 
-    writer = AsdfWriter(fh)
+    asdf_writer.close()
+    asdf_writer._fh.seek(0)
 
-    writer.add_bytes(b"\x00" * 100, base=0)
-    writer.add_bytes(b"\x00" * 100, base=200)
-    writer.add_bytes(bytes(range(200)), base=50)
-    assert writer._table_lookup[0] == [0, 100, 200]
-
-    writer.close()
-    fh.seek(0)
-
-    reader = AsdfSnapshot(fh)
+    reader = AsdfSnapshot(asdf_writer._fh)
     stream = reader.open(0)
 
     assert [(run_start, run_size) for run_start, run_size, _, _ in stream.table] == [
@@ -177,18 +148,13 @@ def test_asdf_overlap_seek():
     assert stream.read() == (b"\x00" * 100) + bytes(range(50, 150)) + (b"\x00" * 100)
 
 
-def test_asdf_mid_run():
-    fh = BytesIO()
-    fh.close = noop  # Prevent clearing the buffer, we need it
+def test_asdf_mid_run(asdf_writer: AsdfWriter):
+    asdf_writer.add_bytes(bytes([v & 0xFF for v in range(4096)]), base=0)
 
-    writer = AsdfWriter(fh)
+    asdf_writer.close()
+    asdf_writer._fh.seek(0)
 
-    writer.add_bytes(bytes([v & 0xFF for v in range(4096)]), base=0)
-
-    writer.close()
-    fh.seek(0)
-
-    reader = AsdfSnapshot(fh)
+    reader = AsdfSnapshot(asdf_writer._fh)
     stream = reader.open(0)
     stream.align = 512
 
@@ -196,19 +162,14 @@ def test_asdf_mid_run():
     assert stream.read(512) == bytes([v & 0xFF for v in range(1100, 1100 + 512)])
 
 
-def test_asdf_metadata():
-    fh = BytesIO()
-    fh.close = noop  # Prevent clearing the buffer, we need it
+def test_asdf_metadata(asdf_writer: AsdfWriter):
+    asdf_writer.add_metadata_file("file", BytesIO(b"content"))
+    asdf_writer.add_metadata_file("dir/file", BytesIO(b"content here too"))
 
-    writer = AsdfWriter(fh)
+    asdf_writer.close()
+    asdf_writer._fh.seek(0)
 
-    writer.add_metadata_file("file", BytesIO(b"content"))
-    writer.add_metadata_file("dir/file", BytesIO(b"content here too"))
-
-    writer.close()
-    fh.seek(0)
-
-    reader = AsdfSnapshot(fh)
+    reader = AsdfSnapshot(asdf_writer._fh)
 
     assert reader.metadata.names() == ["file", "dir/file"]
     assert reader.metadata.open("file").read() == b"content"

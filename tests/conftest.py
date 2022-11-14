@@ -1,5 +1,9 @@
 import os
+from io import BytesIO
+
 import pytest
+
+from dissect.evidence.asdf import AsdfWriter
 
 
 def open_data(name):
@@ -24,3 +28,13 @@ def ad1_data_compressed():
 @pytest.fixture
 def ewf_data():
     return open_data("data/ewf.E01")
+
+
+@pytest.fixture
+def asdf_writer():
+    def noop():
+        pass
+
+    fh = BytesIO()
+    fh.close = noop  # Prevent clearing the buffer, we need it
+    yield AsdfWriter(fh)

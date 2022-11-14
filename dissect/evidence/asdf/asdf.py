@@ -506,7 +506,7 @@ class AsdfStream(AlignedStream):
         super().__init__(size)
 
     def _read(self, offset: int, length: int) -> bytes:
-        r = []
+        result = []
 
         size = self.size
         run_idx = bisect_right(self._table_lookup, offset) - 1
@@ -529,7 +529,7 @@ class AsdfStream(AlignedStream):
                 sparse_remaining = next_run_start - offset
 
                 read_count = min(size - offset, min(sparse_remaining, length))
-                r.append(SPARSE_BYTES * (read_count // len(SPARSE_BYTES)))
+                result.append(SPARSE_BYTES * (read_count // len(SPARSE_BYTES)))
 
                 # Proceed to next run
                 run_idx += 1
@@ -544,7 +544,7 @@ class AsdfStream(AlignedStream):
                 sparse_remaining = sparse_size - sparse_pos
 
                 read_count = min(size - offset, min(sparse_remaining, length))
-                r.append(SPARSE_BYTES * (read_count // len(SPARSE_BYTES)))
+                result.append(SPARSE_BYTES * (read_count // len(SPARSE_BYTES)))
 
                 # Proceed to next run
                 run_idx += 1
@@ -552,7 +552,7 @@ class AsdfStream(AlignedStream):
                 # Previous run consumed, and next run is far away
                 sparse_remaining = run_start - offset
                 read_count = min(size - offset, min(sparse_remaining, length))
-                r.append(SPARSE_BYTES * (read_count // len(SPARSE_BYTES)))
+                result.append(SPARSE_BYTES * (read_count // len(SPARSE_BYTES)))
 
                 # Don't proceed to next run, next loop iteration we'll be within the current run
             else:
@@ -567,7 +567,7 @@ class AsdfStream(AlignedStream):
 
                 # Skip over block header
                 self.fh.seek(run_data_offset + run_pos)
-                r.append(self.fh.read(read_count))
+                result.append(self.fh.read(read_count))
 
                 # Proceed to next run
                 run_idx += 1
@@ -575,7 +575,7 @@ class AsdfStream(AlignedStream):
             offset += read_count
             length -= read_count
 
-        return b"".join(r)
+        return b"".join(result)
 
 
 def _table_fit(
