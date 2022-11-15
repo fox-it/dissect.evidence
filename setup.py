@@ -1,4 +1,4 @@
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
 setup(
     name="dissect.evidence",
@@ -11,6 +11,7 @@ setup(
         "console_scripts": [
             "asdf-dd=dissect.evidence.tools.asdf.dd:main",
             "asdf-meta=dissect.evidence.tools.asdf.meta:main",
+            "asdf-repair=dissect.evidence.tools.asdf.repair:main",
             "asdf-verify=dissect.evidence.tools.asdf.verify:main",
         ],
     },

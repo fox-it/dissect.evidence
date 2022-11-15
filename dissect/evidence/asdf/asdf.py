@@ -9,7 +9,7 @@ import tarfile
 import uuid
 from bisect import bisect_right
 from collections import defaultdict
-from typing import BinaryIO, Callable, Optional
+from typing import BinaryIO, Callable, Iterator, Optional
 
 from dissect import cstruct
 from dissect.util import ts
@@ -361,7 +361,7 @@ class AsdfSnapshot:
         fh: File-like object to read the ASDF file from.
     """
 
-    def __init__(self, fh: BinaryIO):
+    def __init__(self, fh: BinaryIO, recover: bool = False):
         self.fh = fh
         self.header = c_asdf.header(fh)
         if self.header.magic != FILE_MAGIC:
@@ -380,12 +380,15 @@ class AsdfSnapshot:
 
         self.footer = c_asdf.footer(self.fh)
         if self.footer.magic != FOOTER_MAGIC:
-            raise InvalidSnapshot("invalid footer magic")
-
-        self._parse_block_table(
-            self.footer.table_offset,
-            (footer_offset - self.footer.table_offset) // len(c_asdf.table_entry),
-        )
+            if recover:
+                self._recover_block_table()
+            else:
+                raise InvalidSnapshot("invalid footer magic")
+        else:
+            self._parse_block_table(
+                self.footer.table_offset,
+                (footer_offset - self.footer.table_offset) // len(c_asdf.table_entry),
+            )
 
         self.metadata = Metadata(self)
 
@@ -397,6 +400,11 @@ class AsdfSnapshot:
         for _ in range(count):
             entry = c_asdf.table_entry(table_data)
             self._table_insert(entry.idx, entry.offset, entry.size, entry.file_offset)
+
+    def _recover_block_table(self) -> None:
+        self.fh.seek(len(c_asdf.header))
+        for block, file_offset in scrape_blocks(self.fh):
+            self._table_insert(block.idx, block.offset, block.size, file_offset)
 
     def _table_insert(self, idx: int, offset: int, size: int, file_offset: int) -> None:
         stream_idx = idx
@@ -576,6 +584,51 @@ class AsdfStream(AlignedStream):
             length -= read_count
 
         return b"".join(result)
+
+
+def scrape_blocks(fh: BinaryIO, buffer_size: int = io.DEFAULT_BUFFER_SIZE) -> Iterator[cstruct.Instance, int]:
+    """Scrape for block headers in ``fh`` and yield parsed block headers and their offset.
+
+    Args:
+        fh: The file-like object to scrape for block headers.
+        buffer_size: The buffer size to use when scraping.
+    """
+    # If BLOCK_MAGIC is not found in the buffer (4 bytes), it's possible that part of it (up to 3 bytes) is in there
+    # Keep an overlap buffer of 3 bytes that we prepend to the current buffer so we can also find these partial needles
+    overlap_len = len(BLOCK_MAGIC) - 1
+    overlap = b"\x00" * overlap_len
+    while True:
+        pos = fh.tell()
+        buf = fh.read(buffer_size)
+        if not buf:
+            break
+
+        data = overlap + buf
+        needle_pos = -1
+        while True:
+            needle_pos = data.find(BLOCK_MAGIC, needle_pos + 1)
+            if needle_pos == -1:
+                break
+
+            offset = pos + needle_pos - overlap_len
+
+            fh.seek(offset)
+            block_buf = fh.read(len(c_asdf.block))
+
+            # Some sanity checks that this is actually a block header
+            if block_buf[4] not in c_asdf.BLOCK_FLAG.reverse:
+                continue
+
+            if block_buf[6:8] != b"\x00\x00":
+                continue
+
+            block_entry = c_asdf.block(block_buf)
+            yield block_entry, offset
+
+        # Keep the last 3 bytes as overlap
+        overlap = data[-overlap_len:]
+        # Consumer may seek the fh, so seek it back to where we were
+        fh.seek(pos + len(buf))
 
 
 def _table_fit(
