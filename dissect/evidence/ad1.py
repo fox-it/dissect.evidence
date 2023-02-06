@@ -1,7 +1,7 @@
 import zlib
 
 from dissect import cstruct
-from dissect.util.stream import RelativeStream, AlignedStream
+from dissect.util.stream import AlignedStream, RelativeStream
 
 ad1_def = """
 enum EntryType : uint32 {

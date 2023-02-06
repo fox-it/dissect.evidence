@@ -1,10 +1,10 @@
-import io
-import sys
-import stat
-import shutil
-import hashlib
-import datetime
 import argparse
+import datetime
+import hashlib
+import io
+import shutil
+import stat
+import sys
 
 from dissect.evidence.asdf import asdf
 

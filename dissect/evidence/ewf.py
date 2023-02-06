@@ -1,11 +1,11 @@
 from __future__ import print_function
 
+import logging
 import os
 import zlib
-import logging
-from pathlib import Path
 from bisect import bisect_right
 from functools import lru_cache
+from pathlib import Path
 
 from dissect import cstruct
 from dissect.util.stream import AlignedStream
