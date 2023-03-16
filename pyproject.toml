@@ -1,8 +1,37 @@
 [build-system]
-requires = ["setuptools>=43.0.0", "wheel", "setuptools_scm[toml]>=3.4.1"]
+requires = ["setuptools>=65.5.0", "setuptools_scm[toml]>=6.4.0"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools_scm]
+[project]
+name = "dissect.evidence"
+description = "A Dissect module implementing a parsers for various forensic evidence file containers, currently: AD1, ASDF and EWF"
+readme = "README.md"
+requires-python = "~=3.9"
+license.text = "Affero General Public License v3"
+authors = [
+  {name = "Dissect Team", email = "dissect@fox-it.com"}
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+]
+dependencies = [
+    "dissect.cstruct>=3.0.dev,<4.0.dev",
+    "dissect.util>=3.0.dev,<4.0.dev",
+]
+dynamic = ["version"]
+
+[project.urls]
+homepage = "https://dissect.tools"
+documentation = "https://docs.dissect.tools/en/latest/projects/dissect.evidence"
+repository = "https://github.com/fox-it/dissect.evidence"
+
+[project.optional-dependencies]
+
+[project.scripts]
+asdf-dd = "dissect.evidence.tools.asdf.dd:main"
+asdf-meta = "dissect.evidence.tools.asdf.meta:main"
+asdf-repair = "dissect.evidence.tools.asdf.repair:main"
+asdf-verify = "dissect.evidence.tools.asdf.verify:main"
 
 [tool.black]
 line-length = 120
@@ -11,3 +40,11 @@ line-length = 120
 profile = "black"
 known_first_party = ["dissect.evidence"]
 known_third_party = ["dissect"]
+
+[tool.setuptools]
+license-files = ["LICENSE", "COPYRIGHT"]
+
+[tool.setuptools.packages.find]
+include = ["dissect.*"]
+
+[tool.setuptools_scm]
