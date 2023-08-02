@@ -178,7 +178,7 @@ class EWF:
             self._segment_lru.append(idx)
             return self._segments[idx]
 
-        if len(self._segment_lru) > MAX_OPEN_SEGMENTS:
+        if len(self._segment_lru) >= MAX_OPEN_SEGMENTS:
             oldest_idx = self._segment_lru.pop(0)
             oldest_segment = self._segments.pop(oldest_idx)
 
