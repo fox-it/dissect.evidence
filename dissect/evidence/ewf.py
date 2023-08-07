@@ -201,10 +201,10 @@ class EWF:
             segment_offset = self._segment_offsets[idx - 1]
             segment.offset = segment_offset * self.volume.sector_size
             segment.sector_offset = segment_offset
-
-        # Otherwise we're in the initialization loop (or we're idx == 0)
-        segment.offset = 0
-        segment.sector_offset = 0
+        else:
+            # Otherwise we're in the initialization loop (or we're idx == 0)
+            segment.offset = 0
+            segment.sector_offset = 0
 
         self._segments[idx] = segment
         self._segment_lru.append(idx)
