@@ -196,6 +196,16 @@ class EWF:
                 fh = open(fh, "rb")
 
         segment = Segment(self, fh)
+        if self.volume and 0 < idx <= len(self._segment_offsets):
+            # We already have a known segment offset for this segment, so set it back
+            segment_offset = self._segment_offsets[idx - 1]
+            segment.offset = segment_offset * self.volume.sector_size
+            segment.sector_offset = segment_offset
+
+        # Otherwise we're in the initialization loop (or we're idx == 0)
+        segment.offset = 0
+        segment.sector_offset = 0
+
         self._segments[idx] = segment
         self._segment_lru.append(idx)
 
