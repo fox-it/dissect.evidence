@@ -242,9 +242,6 @@ class EWFStream(AlignedStream):
 
         return b"".join(result)
 
-    def _readinto(self, offset: int, buf: memoryview) -> int:
-        return super()._readinto(offset, buf)
-
 
 class Segment:
     def __init__(self, ewf: EWF, fh: BinaryIO):
