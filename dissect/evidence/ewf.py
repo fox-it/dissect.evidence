@@ -293,9 +293,9 @@ class Segment:
 
         self.chunk_count = sum([t.num_entries for t in self.tables])
         self.sector_count = self.chunk_count * self.volume.sector_count
-        self.sector_offset = None
         self.size = self.chunk_count * self.volume.sector_count * self.volume.sector_size
-        self.offset = None
+        self.sector_offset = None  # Set later
+        self.offset = None  # Set later
 
     def read_sectors(self, sector: int, count: int) -> bytes:
         log.debug("Segment::read_sectors(0x%x, 0x%x)", sector, count)
@@ -366,8 +366,8 @@ class TableSection:
         self.entries = self.header.entries
 
         self.sector_count = self.num_entries * self.segment.volume.sector_count
-        self.sector_offset = None  # Set later
         self.size = self.sector_count * self.segment.volume.sector_size
+        self.sector_offset = None  # Set later
         self.offset = None  # Set later
 
         self.read_chunk = lru_cache(1024)(self.read_chunk)
