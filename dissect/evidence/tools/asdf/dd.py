@@ -9,7 +9,7 @@ try:
     from tqdm import tqdm
 
     HAS_TQDM = True
-except ImportError:
+except (AttributeError, ImportError):
     HAS_TQDM = False
 
 
