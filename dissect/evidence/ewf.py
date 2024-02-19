@@ -232,7 +232,7 @@ class EWFStream(AlignedStream):
         while sector_count > 0:
 
             if segment_idx > len(self.ewf._segment_offsets):
-                raise EWFError(f"Reading missing EWF file for idx: {segment_idx}")
+                raise EWFError(f"Missing EWF file for segment index: {segment_idx}")
 
             segment = self.ewf.open_segment(segment_idx)
 
