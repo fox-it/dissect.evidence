@@ -230,7 +230,6 @@ class EWFStream(AlignedStream):
         segment_idx = bisect_right(self.ewf._segment_offsets, sector_offset)
 
         while sector_count > 0:
-
             if segment_idx > len(self.ewf._segment_offsets):
                 raise EWFError(f"Missing EWF file for segment index: {segment_idx}")
 
