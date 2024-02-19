@@ -228,7 +228,12 @@ class EWFStream(AlignedStream):
         sector_count = (length + self.sector_size - 1) // self.sector_size
 
         segment_idx = bisect_right(self.ewf._segment_offsets, sector_offset)
+
         while sector_count > 0:
+
+            if segment_idx > len(self.ewf._segment_offsets):
+                raise EWFError(f"Reading missing EWF file for idx: {segment_idx}")
+
             segment = self.ewf.open_segment(segment_idx)
 
             segment_remaining_sectors = segment.sector_count - (sector_offset - segment.sector_offset)
