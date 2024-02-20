@@ -361,6 +361,8 @@ class TableSection:
         self.segment = segment
         self.section = section
 
+        self.read_chunk = lru_cache(1024)(self.read_chunk)
+
         fh = segment.fh
         fh.seek(section.data_offset)
 
@@ -373,8 +375,6 @@ class TableSection:
         self.size = self.sector_count * self.segment.volume.sector_size
         self.sector_offset = None  # Set later
         self.offset = None  # Set later
-
-        self.read_chunk = lru_cache(1024)(self.read_chunk)
 
     def read_chunk(self, chunk: int) -> bytes:
         log.debug("TableSection::read_chunk(0x%x)", chunk)
