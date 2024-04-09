@@ -13,7 +13,7 @@ from typing import BinaryIO, Callable, Iterator, Optional
 
 from dissect import cstruct
 from dissect.util import ts
-from dissect.util.stream import AlignedStream
+from dissect.util.stream import AlignedStream, RangeStream
 
 from dissect.evidence.asdf.streams import CompressedStream, Crc32Stream, HashedStream
 from dissect.evidence.exceptions import (
@@ -311,8 +311,9 @@ class AsdfWriter(io.RawIOBase):
         block.write(self.fh)
         data_offset = self.fh.tell()  # Block data location
 
-        source.seek(offset)
-        shutil.copyfileobj(source, outfh, size)
+        
+        source_stream = RangeStream(source, offset, size)
+        shutil.copyfileobj(source_stream, outfh, size)
         # This writes any remaining data or footer for each block writer
         outfh.finalize()
 
