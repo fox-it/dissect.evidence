@@ -311,7 +311,6 @@ class AsdfWriter(io.RawIOBase):
         block.write(self.fh)
         data_offset = self.fh.tell()  # Block data location
 
-        
         source_stream = RangeStream(source, offset, size)
         shutil.copyfileobj(source_stream, outfh, size)
         # This writes any remaining data or footer for each block writer
