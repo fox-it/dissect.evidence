@@ -100,8 +100,7 @@ typedef struct {
 } EWFTableSection;
 """
 
-c_ewf = cstruct()
-c_ewf.load(ewf_def)
+c_ewf = cstruct().load(ewf_def)
 
 MAX_OPEN_SEGMENTS = 128
 

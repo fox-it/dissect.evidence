@@ -1,6 +1,6 @@
 import zlib
 
-from dissect import cstruct
+from dissect.cstruct import cstruct
 from dissect.util.stream import AlignedStream, RelativeStream
 
 ad1_def = """
@@ -84,8 +84,7 @@ typedef struct {
     char        data[len];
 } FileMeta;
 """
-c_ad1 = cstruct.cstruct()
-c_ad1.load(ad1_def)
+c_ad1 = cstruct().load(ad1_def)
 
 EntryType = c_ad1.EntryType
 MetaType = c_ad1.MetaType
@@ -101,7 +100,7 @@ class AD1:
         self.root = self.logical_image
 
     def __getattr__(self, k):
-        if k in self.header:
+        if k in self.header.__class__.fields:
             return getattr(self.header, k)
 
         return super().__getattr__(k)
@@ -152,7 +151,7 @@ class LogicalImage:
         return f"<LogicalImage name={self.header.name}>"
 
     def __getattr__(self, k):
-        if k in self.header:
+        if k in self.header.__class__.fields:
             return getattr(self.header, k)
 
         return object.__getattribute__(self, k)
@@ -190,7 +189,7 @@ class FileEntry:
         return f"<{file_type} name={self.entry.name}>"
 
     def __getattr__(self, k):
-        if k in self.entry:
+        if k in self.entry.__class__.fields:
             return getattr(self.entry, k)
 
         return object.__getattribute__(self, k)
@@ -217,7 +216,7 @@ class FileMeta:
         return f"<Meta category={self.entry.category} type={self.entry.type} data={self.entry.data}>"
 
     def __getattr__(self, k):
-        if k in self.entry:
+        if k in self.entry.__class__.fields:
             return getattr(self.entry, k)
 
         return object.__getattribute__(self, k)
