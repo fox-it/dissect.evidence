@@ -11,7 +11,7 @@ from bisect import bisect_right
 from collections import defaultdict
 from typing import BinaryIO, Callable, Iterator, Optional
 
-from dissect import cstruct
+from dissect.cstruct import cstruct
 from dissect.util import ts
 from dissect.util.stream import AlignedStream, RangeStream
 
@@ -84,8 +84,7 @@ struct footer {
     char        sha256[32];     // SHA256 of this file up until this hash
 };
 """
-c_asdf = cstruct.cstruct()
-c_asdf.load(asdf_def)
+c_asdf = cstruct().load(asdf_def)
 
 
 class AsdfWriter(io.RawIOBase):
@@ -147,11 +146,11 @@ class AsdfWriter(io.RawIOBase):
         info.uname = "root"
         info.gname = "root"
 
-        if not size:
+        if size is None and fh.seekable():
             fh.seek(0, io.SEEK_END)
             size = fh.tell()
 
-        info.size = size
+        info.size = size or 0
 
         fh.seek(0)
         self._meta_tar.addfile(info, fh)
@@ -586,7 +585,7 @@ class AsdfStream(AlignedStream):
         return b"".join(result)
 
 
-def scrape_blocks(fh: BinaryIO, buffer_size: int = io.DEFAULT_BUFFER_SIZE) -> Iterator[cstruct.Instance, int]:
+def scrape_blocks(fh: BinaryIO, buffer_size: int = io.DEFAULT_BUFFER_SIZE) -> Iterator[c_asdf.block, int]:
     """Scrape for block headers in ``fh`` and yield parsed block headers and their offset.
 
     Args:
@@ -616,7 +615,7 @@ def scrape_blocks(fh: BinaryIO, buffer_size: int = io.DEFAULT_BUFFER_SIZE) -> It
             block_buf = fh.read(len(c_asdf.block))
 
             # Some sanity checks that this is actually a block header
-            if block_buf[4] not in c_asdf.BLOCK_FLAG.reverse:
+            if block_buf[4] not in c_asdf.BLOCK_FLAG:
                 continue
 
             if block_buf[6:8] != b"\x00\x00":

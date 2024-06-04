@@ -25,8 +25,8 @@ classifiers = [
   "Topic :: Utilities",
 ]
 dependencies = [
-    "dissect.cstruct>=3.0.dev,<4.0.dev",
-    "dissect.util>=3.0.dev,<4.0.dev",
+    "dissect.cstruct>=4.dev,<5",
+    "dissect.util>=3,<4",
 ]
 dynamic = ["version"]
 
@@ -36,6 +36,10 @@ documentation = "https://docs.dissect.tools/en/latest/projects/dissect.evidence"
 repository = "https://github.com/fox-it/dissect.evidence"
 
 [project.optional-dependencies]
+dev = [
+    "dissect.cstruct>=4.0.dev,<5.0.dev",
+    "dissect.util>=3.0.dev,<4.0.dev",
+]
 
 [project.scripts]
 asdf-dd = "dissect.evidence.tools.asdf.dd:main"
