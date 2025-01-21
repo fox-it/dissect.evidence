@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import datetime
 import hashlib
@@ -5,39 +7,37 @@ import io
 import shutil
 import stat
 import sys
+from pathlib import Path
+from typing import TYPE_CHECKING, BinaryIO
 
 from dissect.evidence.asdf import asdf
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
-def iterfileobj(src):
+
+def iterfileobj(src: BinaryIO) -> Iterator[bytes]:
     buf = src.read(io.DEFAULT_BUFFER_SIZE)
     while buf:
         yield buf
         buf = src.read(io.DEFAULT_BUFFER_SIZE)
 
 
-def hashfileobj(src, alg="sha256"):
+def hashfileobj(src: BinaryIO, alg: str = "sha256") -> str:
     ctx = hashlib.new(alg)
     for buf in iterfileobj(src):
         ctx.update(buf)
     return ctx.hexdigest()
 
 
-def stat_modestr(mode):
-    """Helper method for generating a mode string from a numerical mode value."""
-    is_dir = "d" if stat.S_ISDIR(mode) else "-"
-    dic = {"7": "rwx", "6": "rw-", "5": "r-x", "4": "r--", "0": "---"}
-    perm = str(oct(mode)[-3:])
-    return is_dir + "".join(dic.get(x, x) for x in perm)
-
-
-def handle_ls(snapshot, args):
+def handle_ls(snapshot: asdf.AsdfSnapshot, args: argparse.Namespace) -> None:
     for member in snapshot.metadata.members():
-        mtime = datetime.datetime.utcfromtimestamp(member.mtime).isoformat()
-        print(f"{stat_modestr(member.mode)} {member.size:9d} {mtime} {member.name}")
+        mtime = datetime.datetime.fromtimestamp(member.mtime, datetime.timezone.utc).isoformat()
+
+        print(f"{stat.filemode(member.mode)} {member.size:9d} {mtime} {member.name}")
 
 
-def handle_cat(snapshot, args):
+def handle_cat(snapshot: asdf.AsdfSnapshot, args: argparse.Namespace) -> None:
     try:
         fh = snapshot.metadata.open(args.name)
     except Exception:
@@ -50,12 +50,12 @@ def handle_cat(snapshot, args):
         pass
 
 
-def handle_hash(snapshot, args):
+def handle_hash(snapshot: asdf.AsdfSnapshot, args: argparse.Namespace) -> None:
     for name in snapshot.metadata.names():
         print(f"{hashfileobj(snapshot.metadata.open(name))}  {name}")
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description="Utility to work with ASDF metadata")
     parser.add_argument("file", metavar="ASDF", help="ASDF file to verify")
     subparsers = parser.add_subparsers(help="metadata command")
@@ -72,12 +72,17 @@ def main():
 
     if not hasattr(args, "handler"):
         parser.print_help()
-        parser.exit(1)
+        return 1
 
-    with open(args.file, "rb") as fh:
+    with Path(args.file).open("rb") as fh:
         snapshot = asdf.AsdfSnapshot(fh)
         args.handler(snapshot, args)
 
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        pass

@@ -9,7 +9,7 @@ import tarfile
 import uuid
 from bisect import bisect_right
 from collections import defaultdict
-from typing import BinaryIO, Callable, Iterator, Optional
+from typing import TYPE_CHECKING, BinaryIO, Callable
 
 from dissect.cstruct import cstruct
 from dissect.util import ts
@@ -21,6 +21,9 @@ from dissect.evidence.exceptions import (
     InvalidSnapshot,
     UnsupportedVersion,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 SnapshotTableEntry = tuple[int, int, int, int]
 
@@ -107,7 +110,7 @@ class AsdfWriter(io.RawIOBase):
     def __init__(
         self,
         fh: BinaryIO,
-        guid: uuid.UUID = None,
+        guid: uuid.UUID | None = None,
         compress: bool = False,
         block_crc: bool = True,
     ):
@@ -129,11 +132,11 @@ class AsdfWriter(io.RawIOBase):
         self._table_offset = 0
 
         self._meta_buf = io.BytesIO()
-        self._meta_tar = tarfile.open(fileobj=self._meta_buf, mode="w")
+        self._meta_tar = tarfile.open(fileobj=self._meta_buf, mode="w")  # noqa: SIM115
 
         self._write_header()
 
-    def add_metadata_file(self, path: str, fh: BinaryIO, size: Optional[int] = None) -> None:
+    def add_metadata_file(self, path: str, fh: BinaryIO, size: int | None = None) -> None:
         """Add a file to the metadata stream.
 
         Args:
@@ -190,7 +193,7 @@ class AsdfWriter(io.RawIOBase):
         source: BinaryIO,
         offset: int,
         num_blocks: int,
-        block_size: Optional[int] = None,
+        block_size: int | None = None,
         idx: int = 0,
         base: int = 0,
     ) -> None:
@@ -214,7 +217,7 @@ class AsdfWriter(io.RawIOBase):
     def copy_runlist(
         self,
         source: BinaryIO,
-        runlist: list[tuple[Optional[int], int]],
+        runlist: list[tuple[int | None, int]],
         runlist_block_size: int,
         idx: int = 0,
         base: int = 0,
@@ -450,12 +453,12 @@ class AsdfSnapshot:
             raise IndexError(f"invalid stream idx: {idx}")
         return AsdfStream(self, idx)
 
-    def streams(self) -> AsdfStream:
+    def streams(self) -> Iterator[AsdfStream]:
         """Iterate over all streams in the file."""
         for i in sorted(self.table.keys()):
             yield self.open(i)
 
-    def disks(self) -> AsdfStream:
+    def disks(self) -> Iterator[AsdfStream]:
         """Iterate over all non-reserved streams in the file."""
         for i in sorted(self.table.keys()):
             if i in RESERVED_IDX:
@@ -475,7 +478,7 @@ class Metadata:
     def __init__(self, asdf: AsdfSnapshot):
         self.tar = None
         if IDX_METADATA in asdf.table:
-            self.tar = tarfile.open(fileobj=asdf.open(IDX_METADATA), mode="r")
+            self.tar = tarfile.open(fileobj=asdf.open(IDX_METADATA), mode="r")  # noqa: SIM115
 
     def names(self) -> list[str]:
         """Return all metadata file entries."""

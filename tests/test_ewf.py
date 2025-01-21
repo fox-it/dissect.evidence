@@ -1,9 +1,12 @@
-from typing import BinaryIO
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, BinaryIO
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from dissect.evidence import ewf
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def test_ewf(ewf_data: BinaryIO) -> None:

@@ -6,7 +6,7 @@ import zlib
 from bisect import bisect_right
 from functools import lru_cache
 from pathlib import Path
-from typing import BinaryIO, Union
+from typing import BinaryIO
 
 from dissect.cstruct import cstruct
 from dissect.util.stream import AlignedStream
@@ -105,7 +105,7 @@ c_ewf = cstruct().load(ewf_def)
 MAX_OPEN_SEGMENTS = 128
 
 
-def find_files(path: Union[str, Path]) -> list[Path]:
+def find_files(path: str | Path) -> list[Path]:
     """Find all related EWF files from the given path."""
     if not isinstance(path, Path):
         path = Path(path)
@@ -116,10 +116,7 @@ def find_files(path: Union[str, Path]) -> list[Path]:
     if ext[1].upper() not in "ELS":
         raise EWFError(f"Invalid EWF file: {path}")
 
-    if len(ext) == 4:
-        ewfglob = f"[{ext[1]}-{'Z' if ext[1].isupper() else 'z'}]"
-    else:
-        ewfglob = f"{ext[1]}[x-z]"
+    ewfglob = f"[{ext[1]}-{'Z' if ext[1].isupper() else 'z'}]" if len(ext) == 4 else f"{ext[1]}[x-z]"
 
     return sorted(path.parent.glob(f"{path.stem}.{ewfglob}[0-9A-Za-z][0-9A-Za-z]"))
 
@@ -127,7 +124,7 @@ def find_files(path: Union[str, Path]) -> list[Path]:
 class EWF:
     """Expert Witness Disk Image Format."""
 
-    def __init__(self, fh: Union[BinaryIO, list[BinaryIO]]):
+    def __init__(self, fh: BinaryIO | list[BinaryIO]):
         fhs = [fh] if not isinstance(fh, list) else fh
 
         self.fh = fhs
@@ -189,10 +186,7 @@ class EWF:
 
         fh = self.fh[idx]
         if not hasattr(fh, "read"):
-            if isinstance(fh, Path):
-                fh = fh.open("rb")
-            else:
-                fh = open(fh, "rb")
+            fh = fh.open("rb") if isinstance(fh, Path) else Path(fh).open("rb")  # noqa: SIM115
 
         segment = Segment(self, fh)
         if self.volume and 0 < idx <= len(self._segment_offsets):
@@ -344,10 +338,7 @@ class VolumeSection:
 
         fh = segment.fh
         fh.seek(section.data_offset)
-        if section.size == 0x41C:
-            data = c_ewf.EWFVolumeSection(fh)
-        else:
-            data = c_ewf.EWFVolumeSectionSpec(fh)
+        data = c_ewf.EWFVolumeSection(fh) if section.size == 1052 else c_ewf.EWFVolumeSectionSpec(fh)
 
         self.volume = data
         self.chunk_count = data.chunk_count
