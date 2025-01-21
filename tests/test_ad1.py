@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import hashlib
+from typing import BinaryIO
 
 from dissect.evidence import ad1
 
 
-def test_ad1(ad1_data):
+def test_ad1(ad1_data: BinaryIO) -> None:
     a = ad1.AD1(ad1_data)
 
     assert a.header.magic == b"ADSEGMENTEDFILE\x00"
@@ -13,7 +16,7 @@ def test_ad1(ad1_data):
     assert a.root.children[0].open().read() == b"Inhoud document 1"
 
 
-def test_ad1_long(ad1_data_long):
+def test_ad1_long(ad1_data_long: BinaryIO) -> None:
     a = ad1.AD1(ad1_data_long)
 
     assert a.header.magic == b"ADSEGMENTEDFILE\x00"
@@ -30,10 +33,10 @@ def test_ad1_long(ad1_data_long):
         b"'g'asldjg';askg\r\nkqe\r\n-["
     )
     md5sum = hashlib.md5(entry.open().read())
-    assert md5sum.hexdigest().encode() == [meta for meta in entry.meta if meta.type == ad1.MetaType.MD5][0].data
+    assert md5sum.hexdigest().encode() == next(meta for meta in entry.meta if meta.type == ad1.MetaType.MD5).data
 
 
-def test_ad1_compressed(ad1_data_compressed):
+def test_ad1_compressed(ad1_data_compressed: BinaryIO) -> None:
     a = ad1.AD1(ad1_data_compressed)
 
     assert a.root.children[0].open().read() == b"Inhoud document 1"

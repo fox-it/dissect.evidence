@@ -1,12 +1,14 @@
 import argparse
 import io
 import sys
+from contextlib import nullcontext
+from pathlib import Path
 from typing import BinaryIO
 
 from dissect.evidence.asdf import asdf
 
 try:
-    from tqdm import tqdm
+    from tqdm import tqdm  # type: ignore
 
     HAS_TQDM = True
 except ImportError:
@@ -45,7 +47,7 @@ def fill_zero(fhout: BinaryIO, length: int) -> None:
     fhout.write(b"\x00" * remain)
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description="Utility to dump ASDF streams")
     parser.add_argument("file", metavar="ASDF", help="ASDF file to dd")
     parser.add_argument("-w", "--writer", default="-", help="file to write to, default is stdout")
@@ -57,43 +59,43 @@ def main():
         global HAS_TQDM
         HAS_TQDM = False
 
-    with open(args.file, "rb") as fh:
+    with Path(args.file).open("rb") as fh:
         snapshot = asdf.AsdfSnapshot(fh)
 
         if args.stream > 255 or not snapshot.contains(args.stream):
             parser.print_help()
             print(file=sys.stderr)
 
-            valid_keys = ", ".join(str(i) for i in snapshot.table.keys())
-            parser.exit(f"invalid stream index, must be one of {valid_keys}")
+            valid_keys = ", ".join(str(i) for i in snapshot.table)
+            parser.exit(1, f"invalid stream index, must be one of {valid_keys}")
 
         stream = snapshot.open(args.stream)
         progress = Progress(stream.size)
 
-        if args.writer == "-":
-            fhout = sys.stdout.buffer if hasattr(sys.stdout, "buffer") else sys.stdout
-        else:
-            fhout = open(args.writer, "wb")
+        ctx = nullcontext(getattr(sys.stdout, "buffer", sys.stdout)) if args.writer == "-" else None
+        with ctx or Path(args.writer).open("wb") as fhout:
+            try:
+                prev_offset = 0
+                for offset, size, _, data_offset in stream.table:
+                    stream.fh.seek(data_offset)
+                    if fhout.seekable():
+                        fhout.seek(offset)
+                    else:
+                        fill_zero(fhout, offset - prev_offset)
+                    copy_stream(stream.fh, fhout, size)
 
-        try:
-            prev_offset = 0
-            for offset, size, _, data_offset in stream.table:
-                stream.fh.seek(data_offset)
-                if fhout.seekable():
-                    fhout.seek(offset)
-                else:
-                    fill_zero(fhout, offset - prev_offset)
-                copy_stream(stream.fh, fhout, size)
+                    progress.update(offset)
+                    prev_offset = offset
+            except BrokenPipeError:
+                pass
+            finally:
+                progress.close()
 
-                progress.update(offset)
-                prev_offset = offset
-        except BrokenPipeError:
-            pass
-        finally:
-            progress.close()
-            if args.writer != "-":
-                fhout.close()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        pass

@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import zlib
+from typing import Any, BinaryIO
 
 from dissect.cstruct import cstruct
 from dissect.util.stream import AlignedStream, RelativeStream
@@ -91,7 +94,7 @@ MetaType = c_ad1.MetaType
 
 
 class AD1:
-    def __init__(self, fh):
+    def __init__(self, fh: BinaryIO):
         self.fh = fh
         self.header = c_ad1.SegmentedFileHeader(fh)
 
@@ -99,13 +102,13 @@ class AD1:
         self.logical_image = LogicalImage(RelativeStream(fh, offset))
         self.root = self.logical_image
 
-    def __getattr__(self, k):
+    def __getattr__(self, k: str) -> Any:
         if k in self.header.__class__.fields:
             return getattr(self.header, k)
 
         return super().__getattr__(k)
 
-    def entry(self, path=""):
+    def entry(self, path: str = "") -> LogicalImage | FileEntry:
         components = path.lstrip("/").split("/")
         current = self.root
 
@@ -120,37 +123,34 @@ class AD1:
         if current.name == components[-1]:
             return current
 
-        raise IOError("Path not found: %s" % path)
+        raise IOError(f"Path not found: {path}")
 
-    def listdir(self, path):
+    def listdir(self, path: str) -> list[FileEntry]:
         return [e.name for e in self.entry(path).children]
 
-    def get(self, path):
+    def get(self, path: str) -> LogicalImage | FileEntry:
         return self.entry(path)
 
-    def open(self, path):
+    def open(self, path: str) -> FileObject:
         return self.entry(path).open()
-
-    def walk(self):
-        raise NotImplementedError()
 
 
 class LogicalImage:
-    def __init__(self, fh):
+    def __init__(self, fh: BinaryIO):
         self.fh = fh
         self.header = c_ad1.LogicalImageHeader(fh)
 
         self.children = []
         offset = self.header.entry_offset
         while offset != 0:
-            child = FileEntry(self, offset, None)
+            child = FileEntry(self, offset)
             offset = child.entry.next
             self.children.append(child)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<LogicalImage name={self.header.name}>"
 
-    def __getattr__(self, k):
+    def __getattr__(self, k: str) -> Any:
         if k in self.header.__class__.fields:
             return getattr(self.header, k)
 
@@ -158,7 +158,7 @@ class LogicalImage:
 
 
 class FileEntry:
-    def __init__(self, image, offset, parent):
+    def __init__(self, image: LogicalImage, offset: int):
         fh = image.fh
         fh.seek(offset)
         self.image = image
@@ -176,11 +176,11 @@ class FileEntry:
         self.children = []
         offset = self.entry.child
         while offset != 0:
-            child = FileEntry(image, offset, self)
+            child = FileEntry(image, offset)
             offset = child.entry.next
             self.children.append(child)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         file_type = "Unknown type"
         if self.is_file():
             file_type = "File"
@@ -188,34 +188,34 @@ class FileEntry:
             file_type = "Directory"
         return f"<{file_type} name={self.entry.name}>"
 
-    def __getattr__(self, k):
+    def __getattr__(self, k: str) -> Any:
         if k in self.entry.__class__.fields:
             return getattr(self.entry, k)
 
         return object.__getattribute__(self, k)
 
-    def open(self):
+    def open(self) -> FileObject:
         return FileObject(self)
 
-    def is_file(self):
+    def is_file(self) -> bool:
         return self.entry.type == EntryType.File
 
-    def is_dir(self):
+    def is_dir(self) -> bool:
         return self.entry.type == EntryType.Directory
 
 
 class FileMeta:
-    def __init__(self, image, offset):
+    def __init__(self, image: LogicalImage, offset: int):
         fh = image.fh
         fh.seek(offset)
         self.image = image
         self.offset = offset
         self.entry = c_ad1.FileMeta(fh)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Meta category={self.entry.category} type={self.entry.type} data={self.entry.data}>"
 
-    def __getattr__(self, k):
+    def __getattr__(self, k: str) -> Any:
         if k in self.entry.__class__.fields:
             return getattr(self.entry, k)
 
@@ -223,11 +223,11 @@ class FileMeta:
 
 
 class FileObject(AlignedStream):
-    def __init__(self, entry):
+    def __init__(self, entry: FileEntry):
         self.entry = entry
         super().__init__(self.entry.size, self.entry.image.chunk_size)
 
-    def _read(self, offset, length):
+    def _read(self, offset: int, length: int) -> bytes:
         r = []
         fh = self.entry.image.fh
         chunk_size = self.entry.image.chunk_size

@@ -1,4 +1,4 @@
-from __future__ import print_function
+from __future__ import annotations
 
 import argparse
 import hashlib
@@ -6,12 +6,16 @@ import io
 import sys
 import traceback
 from contextlib import contextmanager
-from typing import BinaryIO, Iterator
+from pathlib import Path
+from typing import TYPE_CHECKING, BinaryIO
 from zlib import crc32
 
 from dissect.util.stream import RangeStream
 
 from dissect.evidence.asdf import asdf
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 def iter_fileobj(src: BinaryIO) -> Iterator[bytes]:
@@ -48,7 +52,7 @@ def status(line: str, verbose: bool = False) -> Iterator:
         print(f"[!] {e}")
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description="Utility to verify ASDF files")
     parser.add_argument("file", metavar="ASDF", help="ASDF file to verify")
     parser.add_argument("--skip-hash", action="store_true", help="skip file hash")
@@ -56,7 +60,7 @@ def main():
     parser.add_argument("-v", "--verbose", action="store_true", help="increase verbosity")
     args = parser.parse_args()
 
-    with open(args.file, "rb") as fh:
+    with Path(args.file).open("rb") as fh:
         header = None
         footer = None
         footer_offset = 0
@@ -64,7 +68,8 @@ def main():
         with status("Checking header", args.verbose):
             header = asdf.c_asdf.header(fh)
             if header.magic != asdf.FILE_MAGIC:
-                raise Exception("invalid header magic")
+                print("[!] Invalid header magic")
+                return 1
 
         with status("Checking footer", args.verbose):
             fh.seek(-len(asdf.c_asdf.footer), io.SEEK_END)
@@ -72,16 +77,18 @@ def main():
             footer = asdf.c_asdf.footer(fh)
             if footer.magic != asdf.FOOTER_MAGIC:
                 footer = None
-                raise Exception("invalid footer magic, please run asdf-repair")
+                print("[!] Invalid footer magic, please run asdf-repair")
+                return 1
 
         if not args.skip_hash and footer:
             with status("Checking file hash", args.verbose):
                 hashstream = RangeStream(fh, 0, footer_offset)
                 res = hash_fileobj(hashstream)
                 if res != footer.sha256:
-                    raise Exception("file hash doesn't match")
+                    print(f"[!] File hash doesn't match. Expected {footer.sha256.hex()}, got {res.hex()}")
+                    return 1
         else:
-            print("[!] Skipping file hash")
+            print("[@] Skipping file hash")
 
         if not args.skip_blocks and footer:
             with status("Checking blocks", args.verbose):
@@ -107,8 +114,13 @@ def main():
                         print(f"[!] Block {i} crc32 doesn't match. Expected 0x{target_crc:x}, got 0x{crc:x}")
 
         else:
-            print("[!] Skipping block check")
+            print("[@] Skipping block check")
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        pass
