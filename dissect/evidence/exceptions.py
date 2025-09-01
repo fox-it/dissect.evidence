@@ -3,6 +3,22 @@ class Error(Exception):
     It is used to recognize errors specific to this module"""
 
 
+class FileNotFoundError(Error, FileNotFoundError):
+    pass
+
+
+class IsADirectoryError(Error, IsADirectoryError):
+    pass
+
+
+class NotADirectoryError(Error, NotADirectoryError):
+    pass
+
+
+class NotASymlinkError(Error):
+    pass
+
+
 class EWFError(Error):
     """Related to EWF (Expert Witness disk image Format)"""
 

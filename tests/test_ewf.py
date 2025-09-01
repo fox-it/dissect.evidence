@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, BinaryIO
 from unittest.mock import MagicMock, patch
 
-from dissect.evidence import ewf
+from dissect.evidence.ewf import ewf
 
 if TYPE_CHECKING:
     import pytest
@@ -16,7 +16,7 @@ def test_ewf(ewf_data: BinaryIO) -> None:
     assert e.open().read(4097) == (b"\xde\xad\xbe\xef" * 1024) + b"\n"
 
 
-@patch("dissect.evidence.ewf.Segment")
+@patch("dissect.evidence.ewf.ewf.Segment")
 def test_ewf_open_segment(MockSegment: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ewf, "MAX_OPEN_SEGMENTS", 2)
 
