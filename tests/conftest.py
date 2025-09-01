@@ -43,7 +43,36 @@ def ad1_data_segmented() -> list[BinaryIO]:
     ]
 
 
+@pytest.fixture
+def ad1_data_encrypted_passphrase() -> list[BinaryIO]:
+    return [
+        absolute_path("_data/ad1/encrypted-passphrase/encrypted.ad1").open("rb"),
+        absolute_path("_data/ad1/encrypted-passphrase/encrypted.ad2").open("rb"),
+        absolute_path("_data/ad1/encrypted-passphrase/encrypted.ad3").open("rb"),
+        absolute_path("_data/ad1/encrypted-passphrase/encrypted.ad4").open("rb"),
+        absolute_path("_data/ad1/encrypted-passphrase/encrypted.ad5").open("rb"),
+        absolute_path("_data/ad1/encrypted-passphrase/encrypted.ad6").open("rb"),
+        absolute_path("_data/ad1/encrypted-passphrase/encrypted.ad7").open("rb"),
+        absolute_path("_data/ad1/encrypted-passphrase/encrypted.ad8").open("rb"),
+        absolute_path("_data/ad1/encrypted-passphrase/encrypted.ad9").open("rb"),
+        absolute_path("_data/ad1/encrypted-passphrase/encrypted.ad10").open("rb"),
+        absolute_path("_data/ad1/encrypted-passphrase/encrypted.ad11").open("rb"),
+        absolute_path("_data/ad1/encrypted-passphrase/encrypted.ad12").open("rb"),
+        absolute_path("_data/ad1/encrypted-passphrase/encrypted.ad13").open("rb"),
+    ]
 
+
+@pytest.fixture
+def ad1_data_encrypted_certificate() -> list[BinaryIO]:
+    return [
+        absolute_path("_data/ad1/encrypted-certificate/encrypted.ad1").open("rb"),
+        absolute_path("_data/ad1/encrypted-certificate/encrypted.ad2").open("rb"),
+        absolute_path("_data/ad1/encrypted-certificate/encrypted.ad3").open("rb"),
+        absolute_path("_data/ad1/encrypted-certificate/encrypted.ad4").open("rb"),
+        absolute_path("_data/ad1/encrypted-certificate/encrypted.ad5").open("rb"),
+        absolute_path("_data/ad1/encrypted-certificate/encrypted.ad6").open("rb"),
+        absolute_path("_data/ad1/encrypted-certificate/encrypted.ad7").open("rb"),
+    ]
 
 
 @pytest.fixture
