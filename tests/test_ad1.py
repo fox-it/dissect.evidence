@@ -4,8 +4,11 @@ import hashlib
 from datetime import datetime, timezone
 from typing import BinaryIO
 
+import pytest
+
 from dissect.evidence import ad1
-from dissect.evidence.ad1.ad1 import EntryType, MetaType
+from dissect.evidence.ad1.ad1 import EntryType, MetaType, find_files
+from tests._utils import absolute_path
 
 
 def test_ad1(ad1_data: BinaryIO) -> None:
@@ -66,6 +69,47 @@ def test_ad1_compressed(ad1_data_compressed: BinaryIO) -> None:
     assert fs.get("/").listdir() == ["E:"]
     assert fs.get("E:/AD1_test").listdir() == ["doc1.txt", "doc2.txt"]
     assert fs.get("E:/AD1_test/doc1.txt").open().read() == b"Inhoud document 1"
+
+
+@pytest.mark.parametrize(
+    ("path", "expected_files"),
+    [
+        pytest.param(
+            "_data/ad1/pcbje/text-and-pictures.ad1",
+            [
+                "text-and-pictures.ad1",
+                "text-and-pictures.ad2",
+                "text-and-pictures.ad3",
+                "text-and-pictures.ad4",
+            ],
+            id="segmented-simple",
+        ),
+        pytest.param(
+            "_data/ad1/encrypted-passphrase/encrypted.ad1",
+            [
+                "encrypted.ad1",
+                "encrypted.ad2",
+                "encrypted.ad3",
+                "encrypted.ad4",
+                "encrypted.ad5",
+                "encrypted.ad6",
+                "encrypted.ad7",
+                "encrypted.ad8",
+                "encrypted.ad9",
+                "encrypted.ad10",
+                "encrypted.ad11",
+                "encrypted.ad12",
+                "encrypted.ad13",
+            ],
+            id="segmented-natural-sorting",
+        ),
+    ],
+)
+def test_ad1_find_files(path: str, expected_files: list[str]) -> None:
+    """Test if we correctly find and order segmented AD1 files and do not find .txt or .csv artifact files."""
+
+    files = find_files(absolute_path(path))
+    assert [file.name for file in files] == expected_files
 
 
 def test_ad1_segmented(ad1_data_segmented: list[BinaryIO]) -> None:

@@ -21,7 +21,16 @@ class _c_asdf(__cs__.cstruct):
         reserved2: __cs__.CharArray
         guid: __cs__.CharArray
         @overload
-        def __init__(self, magic: __cs__.CharArray | None = ..., flags: _c_asdf.FILE_FLAG | None = ..., version: _c_asdf.uint8 | None = ..., reserved1: __cs__.CharArray | None = ..., timestamp: _c_asdf.uint64 | None = ..., reserved2: __cs__.CharArray | None = ..., guid: __cs__.CharArray | None = ...): ...
+        def __init__(
+            self,
+            magic: __cs__.CharArray | None = ...,
+            flags: _c_asdf.FILE_FLAG | None = ...,
+            version: _c_asdf.uint8 | None = ...,
+            reserved1: __cs__.CharArray | None = ...,
+            timestamp: _c_asdf.uint64 | None = ...,
+            reserved2: __cs__.CharArray | None = ...,
+            guid: __cs__.CharArray | None = ...,
+        ): ...
         @overload
         def __init__(self, fh: bytes | memoryview | bytearray | BinaryIO, /): ...
 
@@ -33,7 +42,15 @@ class _c_asdf(__cs__.cstruct):
         offset: _c_asdf.uint64
         size: _c_asdf.uint64
         @overload
-        def __init__(self, magic: __cs__.CharArray | None = ..., flags: _c_asdf.BLOCK_FLAG | None = ..., idx: _c_asdf.uint8 | None = ..., reserved: __cs__.CharArray | None = ..., offset: _c_asdf.uint64 | None = ..., size: _c_asdf.uint64 | None = ...): ...
+        def __init__(
+            self,
+            magic: __cs__.CharArray | None = ...,
+            flags: _c_asdf.BLOCK_FLAG | None = ...,
+            idx: _c_asdf.uint8 | None = ...,
+            reserved: __cs__.CharArray | None = ...,
+            offset: _c_asdf.uint64 | None = ...,
+            size: _c_asdf.uint64 | None = ...,
+        ): ...
         @overload
         def __init__(self, fh: bytes | memoryview | bytearray | BinaryIO, /): ...
 
@@ -46,7 +63,16 @@ class _c_asdf(__cs__.cstruct):
         file_offset: _c_asdf.uint64
         file_size: _c_asdf.uint64
         @overload
-        def __init__(self, flags: _c_asdf.BLOCK_FLAG | None = ..., idx: _c_asdf.uint8 | None = ..., reserved: __cs__.CharArray | None = ..., offset: _c_asdf.uint64 | None = ..., size: _c_asdf.uint64 | None = ..., file_offset: _c_asdf.uint64 | None = ..., file_size: _c_asdf.uint64 | None = ...): ...
+        def __init__(
+            self,
+            flags: _c_asdf.BLOCK_FLAG | None = ...,
+            idx: _c_asdf.uint8 | None = ...,
+            reserved: __cs__.CharArray | None = ...,
+            offset: _c_asdf.uint64 | None = ...,
+            size: _c_asdf.uint64 | None = ...,
+            file_offset: _c_asdf.uint64 | None = ...,
+            file_size: _c_asdf.uint64 | None = ...,
+        ): ...
         @overload
         def __init__(self, fh: bytes | memoryview | bytearray | BinaryIO, /): ...
 
@@ -56,7 +82,13 @@ class _c_asdf(__cs__.cstruct):
         table_offset: _c_asdf.uint64
         sha256: __cs__.CharArray
         @overload
-        def __init__(self, magic: __cs__.CharArray | None = ..., reserved: __cs__.CharArray | None = ..., table_offset: _c_asdf.uint64 | None = ..., sha256: __cs__.CharArray | None = ...): ...
+        def __init__(
+            self,
+            magic: __cs__.CharArray | None = ...,
+            reserved: __cs__.CharArray | None = ...,
+            table_offset: _c_asdf.uint64 | None = ...,
+            sha256: __cs__.CharArray | None = ...,
+        ): ...
         @overload
         def __init__(self, fh: bytes | memoryview | bytearray | BinaryIO, /): ...
 

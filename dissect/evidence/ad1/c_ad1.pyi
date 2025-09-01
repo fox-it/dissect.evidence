@@ -95,7 +95,17 @@ class _c_ad1(__cs__.cstruct):
         logical_image_offset: _c_ad1.uint32
         padding: __cs__.CharArray
         @overload
-        def __init__(self, magic: __cs__.CharArray | None = ..., unk1: _c_ad1.uint32 | None = ..., unk2: _c_ad1.uint32 | None = ..., segment_number: _c_ad1.uint32 | None = ..., segment_count: _c_ad1.uint32 | None = ..., segment_size: _c_ad1.uint64 | None = ..., logical_image_offset: _c_ad1.uint32 | None = ..., padding: __cs__.CharArray | None = ...): ...
+        def __init__(
+            self,
+            magic: __cs__.CharArray | None = ...,
+            unk1: _c_ad1.uint32 | None = ...,
+            unk2: _c_ad1.uint32 | None = ...,
+            segment_number: _c_ad1.uint32 | None = ...,
+            segment_count: _c_ad1.uint32 | None = ...,
+            segment_size: _c_ad1.uint64 | None = ...,
+            logical_image_offset: _c_ad1.uint32 | None = ...,
+            padding: __cs__.CharArray | None = ...,
+        ): ...
         @overload
         def __init__(self, fh: bytes | memoryview | bytearray | BinaryIO, /): ...
 
@@ -115,7 +125,23 @@ class _c_ad1(__cs__.cstruct):
         unk3: _c_ad1.uint64
         name: __cs__.CharArray
         @overload
-        def __init__(self, magic: __cs__.CharArray | None = ..., version: _c_ad1.uint32 | None = ..., unk1: _c_ad1.uint32 | None = ..., chunk_size: _c_ad1.uint32 | None = ..., metadata_offset: _c_ad1.uint64 | None = ..., first_file_offset: _c_ad1.uint64 | None = ..., name_len: _c_ad1.uint32 | None = ..., unk_magic: __cs__.CharArray | None = ..., name_offset: _c_ad1.uint64 | None = ..., attr_guid_offset: _c_ad1.uint64 | None = ..., unk2: _c_ad1.uint64 | None = ..., locs_guid_offset: _c_ad1.uint64 | None = ..., unk3: _c_ad1.uint64 | None = ..., name: __cs__.CharArray | None = ...): ...
+        def __init__(
+            self,
+            magic: __cs__.CharArray | None = ...,
+            version: _c_ad1.uint32 | None = ...,
+            unk1: _c_ad1.uint32 | None = ...,
+            chunk_size: _c_ad1.uint32 | None = ...,
+            metadata_offset: _c_ad1.uint64 | None = ...,
+            first_file_offset: _c_ad1.uint64 | None = ...,
+            name_len: _c_ad1.uint32 | None = ...,
+            unk_magic: __cs__.CharArray | None = ...,
+            name_offset: _c_ad1.uint64 | None = ...,
+            attr_guid_offset: _c_ad1.uint64 | None = ...,
+            unk2: _c_ad1.uint64 | None = ...,
+            locs_guid_offset: _c_ad1.uint64 | None = ...,
+            unk3: _c_ad1.uint64 | None = ...,
+            name: __cs__.CharArray | None = ...,
+        ): ...
         @overload
         def __init__(self, fh: bytes | memoryview | bytearray | BinaryIO, /): ...
 
@@ -130,7 +156,18 @@ class _c_ad1(__cs__.cstruct):
         name: __cs__.CharArray
         parent_index: _c_ad1.uint64
         @overload
-        def __init__(self, next: _c_ad1.uint64 | None = ..., child: _c_ad1.uint64 | None = ..., meta: _c_ad1.uint64 | None = ..., zlib_meta: _c_ad1.uint64 | None = ..., size: _c_ad1.uint64 | None = ..., type: _c_ad1.EntryType | None = ..., name_len: _c_ad1.uint32 | None = ..., name: __cs__.CharArray | None = ..., parent_index: _c_ad1.uint64 | None = ...): ...
+        def __init__(
+            self,
+            next: _c_ad1.uint64 | None = ...,
+            child: _c_ad1.uint64 | None = ...,
+            meta: _c_ad1.uint64 | None = ...,
+            zlib_meta: _c_ad1.uint64 | None = ...,
+            size: _c_ad1.uint64 | None = ...,
+            type: _c_ad1.EntryType | None = ...,
+            name_len: _c_ad1.uint32 | None = ...,
+            name: __cs__.CharArray | None = ...,
+            parent_index: _c_ad1.uint64 | None = ...,
+        ): ...
         @overload
         def __init__(self, fh: bytes | memoryview | bytearray | BinaryIO, /): ...
 
@@ -138,7 +175,9 @@ class _c_ad1(__cs__.cstruct):
         num_chunks: _c_ad1.uint64
         chunks: __cs__.Array[_c_ad1.uint64]
         @overload
-        def __init__(self, num_chunks: _c_ad1.uint64 | None = ..., chunks: __cs__.Array[_c_ad1.uint64] | None = ...): ...
+        def __init__(
+            self, num_chunks: _c_ad1.uint64 | None = ..., chunks: __cs__.Array[_c_ad1.uint64] | None = ...
+        ): ...
         @overload
         def __init__(self, fh: bytes | memoryview | bytearray | BinaryIO, /): ...
 
@@ -149,7 +188,14 @@ class _c_ad1(__cs__.cstruct):
         len: _c_ad1.uint32
         data: __cs__.CharArray
         @overload
-        def __init__(self, next: _c_ad1.uint64 | None = ..., category: _c_ad1.uint32 | None = ..., type: _c_ad1.MetaType | None = ..., len: _c_ad1.uint32 | None = ..., data: __cs__.CharArray | None = ...): ...
+        def __init__(
+            self,
+            next: _c_ad1.uint64 | None = ...,
+            category: _c_ad1.uint32 | None = ...,
+            type: _c_ad1.MetaType | None = ...,
+            len: _c_ad1.uint32 | None = ...,
+            data: __cs__.CharArray | None = ...,
+        ): ...
         @overload
         def __init__(self, fh: bytes | memoryview | bytearray | BinaryIO, /): ...
 

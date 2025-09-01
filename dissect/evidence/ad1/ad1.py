@@ -20,11 +20,14 @@ EntryType = c_ad1.EntryType
 MetaType = c_ad1.MetaType
 FileClassType = c_ad1.FileClassType
 
+
 def atoi(text: str) -> int | str:
     return int(text) if text.isdigit() else text
 
-def natural_keys(text: str | Path) -> list[int|str]:
+
+def natural_keys(text: str | Path) -> list[int | str]:
     return [atoi(c) for c in re.split(r"(\d+)", str(text))]
+
 
 def find_files(path: Path) -> set[Path]:
     files = set()
@@ -145,7 +148,7 @@ class AD1LogicalImage:
         self.chunk_size = self.header.chunk_size
 
     def __repr__(self) -> str:
-        return f"<AD1LogicalImage version={self.version} name={self.name} offset={self.offset} chunk_size={self.chunk_size}>"
+        return f"<AD1LogicalImage version={self.version} name={self.name} offset={self.offset} chunk_size={self.chunk_size}>"  # noqa: E501
 
 
 class FileEntry:
