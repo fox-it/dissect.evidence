@@ -1,13 +1,14 @@
 [build-system]
-requires = ["setuptools>=65.5.0", "setuptools_scm[toml]>=6.4.0"]
+requires = ["setuptools>=77.0.0", "setuptools_scm[toml]>=6.4.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "dissect.evidence"
 description = "A Dissect module implementing a parsers for various forensic evidence file containers, currently: AD1, ASDF and EWF"
 readme = "README.md"
-requires-python = "~=3.9"
-license.text = "Affero General Public License v3"
+requires-python = ">=3.10"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE", "COPYRIGHT"]
 authors = [
   {name = "Dissect Team", email = "dissect@fox-it.com"}
 ]
@@ -16,7 +17,6 @@ classifiers = [
   "Environment :: Console",
   "Intended Audience :: Developers",
   "Intended Audience :: Information Technology",
-  "License :: OSI Approved",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Topic :: Internet :: Log Analysis",
@@ -41,6 +41,26 @@ dev = [
     "dissect.util>=3.0.dev,<4.0.dev",
 ]
 
+[dependency-groups]
+test = [
+    "pytest",
+]
+lint = [
+    "ruff==0.13.1",
+    "vermin",
+]
+build = [
+    "build",
+]
+debug = [
+    "ipdb",
+]
+dev = [
+    {include-group = "test"},
+    {include-group = "lint"},
+    {include-group = "debug"},
+]
+
 [project.scripts]
 asdf-dd = "dissect.evidence.tools.asdf.dd:main"
 asdf-meta = "dissect.evidence.tools.asdf.meta:main"
@@ -49,7 +69,7 @@ asdf-verify = "dissect.evidence.tools.asdf.verify:main"
 
 [tool.ruff]
 line-length = 120
-required-version = ">=0.9.0"
+required-version = ">=0.13.1"
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -97,9 +117,6 @@ ignore = ["E203", "B904", "UP024", "ANN002", "ANN003", "ANN204", "ANN401", "SIM1
 [tool.ruff.lint.isort]
 known-first-party = ["dissect.evidence"]
 known-third-party = ["dissect"]
-
-[tool.setuptools]
-license-files = ["LICENSE", "COPYRIGHT"]
 
 [tool.setuptools.packages.find]
 include = ["dissect.*"]
