@@ -69,7 +69,7 @@ asdf-verify = "dissect.evidence.tools.asdf.verify:main"
 
 [tool.ruff]
 line-length = 120
-required-version = ">=0.9.0"
+required-version = ">=0.13.1"
 
 [tool.ruff.format]
 docstring-code-format = true
