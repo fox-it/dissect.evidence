@@ -35,15 +35,13 @@ class Progress:
 
 def copy_stream(fhin: BinaryIO, fhout: BinaryIO, length: int) -> None:
     n, remain = divmod(length, io.DEFAULT_BUFFER_SIZE)
-    for _ in range(n):
-        fhout.write(fhin.read(io.DEFAULT_BUFFER_SIZE))
+    fhout.writelines(fhin.read(io.DEFAULT_BUFFER_SIZE) for _ in range(n))
     fhout.write(fhin.read(remain))
 
 
 def fill_zero(fhout: BinaryIO, length: int) -> None:
     n, remain = divmod(length, io.DEFAULT_BUFFER_SIZE)
-    for _ in range(n):
-        fhout.write(b"\x00" * io.DEFAULT_BUFFER_SIZE)
+    fhout.writelines(b"\x00" * io.DEFAULT_BUFFER_SIZE for _ in range(n))
     fhout.write(b"\x00" * remain)
 
 

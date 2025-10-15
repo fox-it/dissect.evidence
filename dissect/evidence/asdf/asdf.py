@@ -9,7 +9,7 @@ import tarfile
 import uuid
 from bisect import bisect_right
 from collections import defaultdict
-from typing import TYPE_CHECKING, BinaryIO, Callable
+from typing import TYPE_CHECKING, BinaryIO
 
 from dissect.cstruct import cstruct
 from dissect.util import ts
@@ -23,7 +23,7 @@ from dissect.evidence.exceptions import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
 SnapshotTableEntry = tuple[int, int, int, int]
 
