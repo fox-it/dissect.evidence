@@ -29,7 +29,13 @@ class _c_ewf(__cs__.cstruct):
         segment_number: _c_ewf.uint16
         fields_end: _c_ewf.uint16
         @overload
-        def __init__(self, signature: __cs__.CharArray | None = ..., fields_start: _c_ewf.uint8 | None = ..., segment_number: _c_ewf.uint16 | None = ..., fields_end: _c_ewf.uint16 | None = ...): ...
+        def __init__(
+            self,
+            signature: __cs__.CharArray | None = ...,
+            fields_start: _c_ewf.uint8 | None = ...,
+            segment_number: _c_ewf.uint16 | None = ...,
+            fields_end: _c_ewf.uint16 | None = ...,
+        ): ...
         @overload
         def __init__(self, fh: bytes | memoryview | bytearray | BinaryIO, /): ...
 
@@ -40,7 +46,14 @@ class _c_ewf(__cs__.cstruct):
         pad: __cs__.Array[_c_ewf.uint8]
         checksum: _c_ewf.uint32
         @overload
-        def __init__(self, type: __cs__.CharArray | None = ..., next: _c_ewf.uint64 | None = ..., size: _c_ewf.uint64 | None = ..., pad: __cs__.Array[_c_ewf.uint8] | None = ..., checksum: _c_ewf.uint32 | None = ...): ...
+        def __init__(
+            self,
+            type: __cs__.CharArray | None = ...,
+            next: _c_ewf.uint64 | None = ...,
+            size: _c_ewf.uint64 | None = ...,
+            pad: __cs__.Array[_c_ewf.uint8] | None = ...,
+            checksum: _c_ewf.uint32 | None = ...,
+        ): ...
         @overload
         def __init__(self, fh: bytes | memoryview | bytearray | BinaryIO, /): ...
 
@@ -55,7 +68,18 @@ class _c_ewf(__cs__.cstruct):
         signature: __cs__.CharArray
         checksum: _c_ewf.uint32
         @overload
-        def __init__(self, reserved_1: _c_ewf.uint32 | None = ..., chunk_count: _c_ewf.uint32 | None = ..., sector_count: _c_ewf.uint32 | None = ..., sector_size: _c_ewf.uint32 | None = ..., total_sector_count: _c_ewf.uint32 | None = ..., reserved: __cs__.Array[_c_ewf.uint8] | None = ..., pad: __cs__.Array[_c_ewf.uint8] | None = ..., signature: __cs__.CharArray | None = ..., checksum: _c_ewf.uint32 | None = ...): ...
+        def __init__(
+            self,
+            reserved_1: _c_ewf.uint32 | None = ...,
+            chunk_count: _c_ewf.uint32 | None = ...,
+            sector_count: _c_ewf.uint32 | None = ...,
+            sector_size: _c_ewf.uint32 | None = ...,
+            total_sector_count: _c_ewf.uint32 | None = ...,
+            reserved: __cs__.Array[_c_ewf.uint8] | None = ...,
+            pad: __cs__.Array[_c_ewf.uint8] | None = ...,
+            signature: __cs__.CharArray | None = ...,
+            checksum: _c_ewf.uint32 | None = ...,
+        ): ...
         @overload
         def __init__(self, fh: bytes | memoryview | bytearray | BinaryIO, /): ...
 
@@ -83,7 +107,31 @@ class _c_ewf(__cs__.cstruct):
         signature: __cs__.CharArray
         checksum: _c_ewf.uint32
         @overload
-        def __init__(self, media_type: _c_ewf.MediaType | None = ..., reserved_1: __cs__.Array[_c_ewf.uint8] | None = ..., chunk_count: _c_ewf.uint32 | None = ..., sector_count: _c_ewf.uint32 | None = ..., sector_size: _c_ewf.uint32 | None = ..., total_sector_count: _c_ewf.uint64 | None = ..., num_cylinders: _c_ewf.uint32 | None = ..., num_heads: _c_ewf.uint32 | None = ..., num_sectors: _c_ewf.uint32 | None = ..., media_flags: _c_ewf.uint8 | None = ..., unknown_1: __cs__.Array[_c_ewf.uint8] | None = ..., palm_start_sector: _c_ewf.uint32 | None = ..., unknown_2: _c_ewf.uint32 | None = ..., smart_start_sector: _c_ewf.uint32 | None = ..., compression_level: _c_ewf.CompressionLevel | None = ..., unknown_3: __cs__.Array[_c_ewf.uint8] | None = ..., error_granularity: _c_ewf.uint32 | None = ..., unknown_4: _c_ewf.uint32 | None = ..., uuid: __cs__.Array[_c_ewf.uint8] | None = ..., pad: __cs__.Array[_c_ewf.uint8] | None = ..., signature: __cs__.CharArray | None = ..., checksum: _c_ewf.uint32 | None = ...): ...
+        def __init__(
+            self,
+            media_type: _c_ewf.MediaType | None = ...,
+            reserved_1: __cs__.Array[_c_ewf.uint8] | None = ...,
+            chunk_count: _c_ewf.uint32 | None = ...,
+            sector_count: _c_ewf.uint32 | None = ...,
+            sector_size: _c_ewf.uint32 | None = ...,
+            total_sector_count: _c_ewf.uint64 | None = ...,
+            num_cylinders: _c_ewf.uint32 | None = ...,
+            num_heads: _c_ewf.uint32 | None = ...,
+            num_sectors: _c_ewf.uint32 | None = ...,
+            media_flags: _c_ewf.uint8 | None = ...,
+            unknown_1: __cs__.Array[_c_ewf.uint8] | None = ...,
+            palm_start_sector: _c_ewf.uint32 | None = ...,
+            unknown_2: _c_ewf.uint32 | None = ...,
+            smart_start_sector: _c_ewf.uint32 | None = ...,
+            compression_level: _c_ewf.CompressionLevel | None = ...,
+            unknown_3: __cs__.Array[_c_ewf.uint8] | None = ...,
+            error_granularity: _c_ewf.uint32 | None = ...,
+            unknown_4: _c_ewf.uint32 | None = ...,
+            uuid: __cs__.Array[_c_ewf.uint8] | None = ...,
+            pad: __cs__.Array[_c_ewf.uint8] | None = ...,
+            signature: __cs__.CharArray | None = ...,
+            checksum: _c_ewf.uint32 | None = ...,
+        ): ...
         @overload
         def __init__(self, fh: bytes | memoryview | bytearray | BinaryIO, /): ...
 
@@ -94,7 +142,14 @@ class _c_ewf(__cs__.cstruct):
         checksum: _c_ewf.uint32
         entries: __cs__.Array[_c_ewf.uint32]
         @overload
-        def __init__(self, num_entries: _c_ewf.uint32 | None = ..., _: _c_ewf.uint32 | None = ..., base_offset: _c_ewf.uint64 | None = ..., checksum: _c_ewf.uint32 | None = ..., entries: __cs__.Array[_c_ewf.uint32] | None = ...): ...
+        def __init__(
+            self,
+            num_entries: _c_ewf.uint32 | None = ...,
+            _: _c_ewf.uint32 | None = ...,
+            base_offset: _c_ewf.uint64 | None = ...,
+            checksum: _c_ewf.uint32 | None = ...,
+            entries: __cs__.Array[_c_ewf.uint32] | None = ...,
+        ): ...
         @overload
         def __init__(self, fh: bytes | memoryview | bytearray | BinaryIO, /): ...
 

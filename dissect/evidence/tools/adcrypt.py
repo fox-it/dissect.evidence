@@ -7,7 +7,7 @@ from pathlib import Path
 from dissect.evidence.ad1.ad1 import find_files as find_ad1_files
 from dissect.evidence.adcrypt.adcrypt import ADCrypt
 from dissect.evidence.ewf.ewf import find_files as find_ewf_files
-from dissect.evidence.tools.utils import catch_sigpipe
+from dissect.evidence.tools.util import catch_sigpipe
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s]\t%(message)s")
 log = logging.getLogger(__name__)
@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 def main() -> None:
     help_formatter = argparse.ArgumentDefaultsHelpFormatter
     parser = argparse.ArgumentParser(
-        prog="adecrypt",
+        prog="adcrypt",
         description="Decrypt E01 or AD1 ADCRYPT encrypted segment files.",
         fromfile_prefix_chars="@",
         formatter_class=help_formatter,

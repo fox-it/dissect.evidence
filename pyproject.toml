@@ -27,7 +27,7 @@ classifiers = [
 dependencies = [
     "dissect.cstruct>=4,<5",
     "dissect.util>=3,<4",
-    "pycryptodome>=3.23.0,<4",
+    "pycryptodome",
 ]
 dynamic = ["version"]
 
@@ -40,7 +40,6 @@ repository = "https://github.com/fox-it/dissect.evidence"
 dev = [
     "dissect.cstruct>=4.0.dev,<5.0.dev",
     "dissect.util>=3.0.dev,<4.0.dev",
-    "pycryptodome>=3.23.0.dev,<4.0.dev",
 ]
 
 [dependency-groups]
@@ -69,7 +68,7 @@ asdf-meta = "dissect.evidence.tools.asdf.meta:main"
 asdf-repair = "dissect.evidence.tools.asdf.repair:main"
 asdf-verify = "dissect.evidence.tools.asdf.verify:main"
 
-adecrypt = "dissect.evidence.tools.adcrypt:main"
+adcrypt = "dissect.evidence.tools.adcrypt:main"
 
 [tool.ruff]
 line-length = 120

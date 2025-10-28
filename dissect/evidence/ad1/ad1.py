@@ -40,7 +40,7 @@ def find_files(path: Path) -> set[Path]:
 class AD1:
     """AccessData Logical Image (AD1v4) implementation.
 
-    Supports ``zlib`` compressed images. Does not support encrypted (``b"ADCRYPT"``) images.
+    Supports ``zlib`` compressed images. Does not directly support encrypted (``b"ADCRYPT"``) images.
 
     Should be initialized using a list of segment files, e.g.::
 
@@ -70,7 +70,6 @@ class AD1:
             self.segments.append(segment)
 
             # Add the segment file handle to the mapping stream, minus the segment header.
-            # TODO: Does this work as expected?
             self.stream.add(self.stream.size or 0, segment.header.segment_size - 512, fh, 512)
 
         # The first .ad1 file contains an image header
@@ -78,7 +77,8 @@ class AD1:
         self.logical_image = AD1LogicalImage(RelativeStream(self.fhs[0], offset))  # NOTE: Unnecesary RelativeStream?
         self.root = FileEntry(self, -1, is_root=True, root_name="/")
 
-        # Add entries for all parts in logical_image.name
+        # Add entries for all parts in logical_image.name. This name commonly contains the full path each entry in the
+        # container is relative to.
         root_name = self.logical_image.header.name.decode()
         root_path = (
             PureWindowsPath(root_name) if "/" not in root_name and "\\" in root_name else PurePosixPath(root_name)
@@ -103,6 +103,15 @@ class AD1:
             offset = child.entry.next
 
     def entry(self, path: str) -> FileEntry:
+        """Return a :class:`FileEntry` based on the given absolute `path`.
+
+        Raises:
+            FileNotFoundError if the given `path` is not found in the `AD1` container.
+
+        Returns:
+            :class:`FileEntry` when the given `path` is found.
+        """
+
         components = path.lstrip("/").split("/")
         current = self.root
 
@@ -120,13 +129,19 @@ class AD1:
         raise FileNotFoundError(f"Path not found: {path}")
 
     def get(self, path: str) -> FileEntry:
+        """Shortcut method to ``AD1.entry()`` for the given ``path``."""
+
         return self.entry(path)
 
     def open(self, path: str) -> FileObject:
+        """Shortcut method to ``FileEntry.open()`` for the given ``path``."""
+
         return self.entry(path).open()
 
 
 class AD1SegmentFile:
+    """Represents an AD1 segmented file."""
+
     def __init__(self, fh: BinaryIO):
         self.fh = fh
         self.header = c_ad1.SegmentedFileHeader(fh)
@@ -139,6 +154,8 @@ class AD1SegmentFile:
 
 
 class AD1LogicalImage:
+    """Represents an AD1 logical image."""
+
     def __init__(self, fh: BinaryIO):
         self.fh = fh
         self.header = c_ad1.LogicalImageHeader(fh)
@@ -152,6 +169,8 @@ class AD1LogicalImage:
 
 
 class FileEntry:
+    """Represents a file entry in an AD1 logical image."""
+
     def __init__(self, ad1: AD1, offset: int, is_root: bool = False, root_name: str | None = None):
         self.ad1 = ad1
         self.offset = offset
@@ -275,6 +294,8 @@ def convert_ts(input: bytes) -> datetime:
 
 
 class FileMeta:
+    """Represents a single AD1 logical file metadata item found inside :class:`FileEntry`."""
+
     def __init__(self, stream: MappingStream, offset: int):
         self.stream = stream
         self.offset = offset
@@ -292,9 +313,14 @@ class FileMeta:
 
 # TODO: Can we just use ZlibStream from dissect.util.stream?
 class FileObject(AlignedStream):
+    """Custom stream format implementation for AD1 :class:`FileEntry` file contents."""
+
     def __init__(self, entry: FileEntry):
         self.entry = entry
         super().__init__(self.entry.size, self.entry.ad1.logical_image.chunk_size)
+
+        self.entry.ad1.stream.seek(self.entry.entry.zlib_meta)
+        self.chunks = c_ad1.FileEntryChunks(self.entry.ad1.stream).chunks
 
     def _read(self, offset: int, length: int) -> bytes:
         r = []
@@ -304,10 +330,7 @@ class FileObject(AlignedStream):
         chunk = offset // chunk_size
         chunk_count = (length + chunk_size - 1) // chunk_size
 
-        self.entry.ad1.stream.seek(self.entry.entry.zlib_meta)
-        chunks = c_ad1.FileEntryChunks(self.entry.ad1.stream).chunks
-
-        chunk_offsets = chunks[chunk : chunk + chunk_count + 1]
+        chunk_offsets = self.chunks[chunk : chunk + chunk_count + 1]
         if len(chunk_offsets) != chunk_count + 1:
             chunk_offsets.append(self.entry.entry.meta)
 
