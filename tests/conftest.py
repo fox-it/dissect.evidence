@@ -13,8 +13,12 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
+def absolute_path(filename: str) -> Path:
+    return Path(__file__).parent / filename
+
+
 def open_data(name: str) -> Iterator[BinaryIO]:
-    with (Path(__file__).parent / name).open("rb") as fh:
+    with absolute_path(name).open("rb") as fh:
         yield fh
 
 
