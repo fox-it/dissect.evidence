@@ -11,7 +11,7 @@ from typing import BinaryIO
 from dissect.util.stream import AlignedStream
 
 from dissect.evidence.ewf import c_ewf
-from dissect.evidence.exceptions import EWFError
+from dissect.evidence.exception import EWFError
 
 log = logging.getLogger(__name__)
 log.setLevel(os.getenv("DISSECT_LOG_EWF", "CRITICAL"))
@@ -39,7 +39,7 @@ def find_files(path: str | Path) -> list[Path]:
 class EWF:
     """Expert Witness Disk Image Format."""
 
-    def __init__(self, fh: BinaryIO | list[BinaryIO]):
+    def __init__(self, fh: BinaryIO | list[BinaryIO] | Path | list[Path]):
         fhs = [fh] if not isinstance(fh, list) else fh
 
         self.fh = fhs
@@ -53,7 +53,7 @@ class EWF:
 
         for i in range(len(fhs)):
             try:
-                segment = self.open_segment(i)
+                segment = self.segment(i)
             except Exception:
                 log.exception("Failed to parse as EWF file: %s", fh)
                 continue
@@ -77,12 +77,12 @@ class EWF:
         self.chunk_size = self.volume.sector_count * self.volume.sector_size
 
         max_size = self.volume.chunk_count * self.volume.sector_count * self.volume.sector_size
-        last_table = self.open_segment(len(self.fh) - 1).tables[-1]
+        last_table = self.segment(len(self.fh) - 1).tables[-1]
         last_chunk_size = len(last_table.read_chunk(last_table.num_entries - 1))
 
         self.size = max_size - (self.chunk_size - last_chunk_size)
 
-    def open_segment(self, idx: int) -> Segment:
+    def segment(self, idx: int) -> Segment:
         # Poor mans LRU
         if idx in self._segments:
             self._segment_lru.remove(idx)
@@ -141,7 +141,7 @@ class EWFStream(AlignedStream):
             if segment_idx > len(self.ewf._segment_offsets):
                 raise EWFError(f"Missing EWF file for segment index: {segment_idx}")
 
-            segment = self.ewf.open_segment(segment_idx)
+            segment = self.ewf.segment(segment_idx)
 
             segment_remaining_sectors = segment.sector_count - (sector_offset - segment.sector_offset)
             segment_sectors = min(segment_remaining_sectors, sector_count)

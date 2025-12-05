@@ -6,8 +6,8 @@ from io import BytesIO
 import pytest
 
 from dissect.evidence.asdf.asdf import AsdfSnapshot, AsdfWriter
-from dissect.evidence.asdf.streams import CompressedStream, Crc32Stream, HashedStream
-from dissect.evidence.exceptions import InvalidSnapshot
+from dissect.evidence.asdf.stream import CompressedStream, Crc32Stream, HashedStream
+from dissect.evidence.exception import InvalidSnapshot
 
 
 def test_asdf(asdf_writer: AsdfWriter) -> None:

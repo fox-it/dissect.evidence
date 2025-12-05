@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
+import io
 from pathlib import Path
 from typing import BinaryIO
+
+from dissect.util.stream import AlignedStream
 
 from dissect.evidence.adcrypt.c_adcrypt import c_adcrypt
 
 try:
-    from Crypto import Hash
     from Crypto.Cipher import AES, PKCS1_v1_5
-    from Crypto.Hash import HMAC
     from Crypto.Protocol.KDF import PBKDF2
     from Crypto.PublicKey import RSA
     from Crypto.Util import Counter
@@ -17,22 +20,38 @@ try:
 except ImportError:
     HAS_CRYPTO = False
 
+MAX_OPEN_SEGMENTS = 128
+
+
+def is_adcrypt(fh: BinaryIO) -> bool:
+    """Check if the file handle is an ADCRYPT container.
+
+    Args:
+        fh: The file handle to check.
+    """
+    fh.seek(0)
+    return fh.read(8) == c_adcrypt.ADCRYPT_MAGIC.encode()
+
 
 class ADCrypt:
     """Access Data ADCRYPT encrypted container implementation.
 
+    Not particularly useful on its own, but used by other evidence types such as AD1.
+    Pass the first segment file handle to this class, then use :meth:`unlock` to unlock the container,
+    and :meth:`wrap` to wrap other segment file handles into decrypting streams.
+
     References:
-        - Reversing adencrypt.dll
+        - Reverse engineering ``adencrypt.dll``
         - https://github.com/libyal/libewf/blob/main/documentation/Expert%20Witness%20Compression%20Format%20(EWF).asciidoc#7-ad-encryption
         - https://github.com/log2timeline/plaso/issues/2726#issuecomment-517444736
     """
 
-    def __init__(self, fhs: BinaryIO | list[BinaryIO]):
-        self.fhs = fhs if isinstance(fhs, list) else [fhs]
-        self.segments: list[ADCryptSegment] = []
+    def __init__(self, fh: BinaryIO) -> None:
+        self.fh = fh
+        self.fh.seek(0)
 
         try:
-            self.header: c_adcrypt.Header = c_adcrypt.Header(self.fhs[0])
+            self.header: c_adcrypt.Header = c_adcrypt.Header(self.fh)
         except EOFError:
             raise ValueError("File handle is not an ADCRYPT container: Unable to read ADCRYPT header")
 
@@ -42,102 +61,119 @@ class ADCrypt:
         if self.header.version != 1:
             raise ValueError(f"Unsupported ADCRYPT container version {self.header.version!r}")
 
-        for i, fh in enumerate(self.fhs):
-            self.segments.append(ADCryptSegment(fh, i))
-            # TODO: We should probably create a mapping stream.
+        self.key: bytes | None = None
 
-    def decrypt(self, *, passphrase: str | bytes | None = None, private_key: Path | BinaryIO | None = None) -> None:
-        """Attempt to decrypt all ADCRYPT segment files.
+    def is_locked(self) -> bool:
+        """Return whether the ADCRYPT container is locked."""
+        return self.key is None
+
+    def unlock(self, *, passphrase: str | bytes | None = None, private_key: Path | bytes | None = None) -> None:
+        """Unlock the ADCRYPT container with a given passphrase or private key.
+
+        Args:
+            passphrase: The passphrase to unlock the container.
+            private_key: The private key to unlock the container.
 
         Raises:
-            ImportError if dependencies are missing.
-            ValueError if decryption failed.
+            RuntimeError: If required dependencies are missing.
+            ValueError: If unlocking failed.
         """
-
         if not HAS_CRYPTO:
-            raise ImportError("Missing required dependency 'pycryptodome' for ADCRYPT decryption.")
+            raise RuntimeError("Missing required dependency 'pycryptodome' for ADCRYPT decryption.")
 
-        if all(segment.decrypted for segment in self.segments):
-            return
-
-        if not private_key and isinstance(passphrase, str):
-            passphrase = passphrase.encode()
-
-        # If a private key was used, the passphrase is empty.
-        passphrase_hash = b""
-
-        if passphrase and not private_key:
-            hash = Hash.new(self.header.hash_algo.name)
-            hash.update(passphrase)
-            passphrase_hash = hash.digest()
-
-        # If no private key was used, the "encrypted" salt is the plaintext salt as-is.
-        salt = self.header.enc_salt
-
-        # Decrypt the salt if a private key was provided.
-        if private_key:
-            rsa_key = RSA.import_key(
-                private_key.read_bytes() if isinstance(private_key, Path) else private_key, passphrase
-            )
-            pkcs_cipher = PKCS1_v1_5.new(rsa_key)
-            if not (salt := pkcs_cipher.decrypt(self.header.enc_salt, sentinel=None, expected_pt_len=16)):
-                raise ValueError("Failed to decrypt salt using provided private key")
-
-        key_len = self.header.key_len
-        count = self.header.pbkdf2_count
-        pkey = PBKDF2(passphrase_hash, salt, key_len, count)
+        pkey = adcrypt_kdf(
+            passphrase,
+            private_key,
+            self.header.enc_salt,
+            self.header.key_len,
+            self.header.pbkdf2_count,
+            self.header.hash_algo.name.lower(),
+        )
 
         # Verify the HMAC of EKEY using PKEY + hash algo, comparing with header HMAC
-        hmac = HMAC.new(pkey, digestmod=Hash.new(self.header.hash_algo.name))
-        hmac.update(self.header.enc_key)
-        try:
-            hmac.verify(self.header.hmac_enc_key)
-        except ValueError as e:
-            raise ValueError("Unable to decrypt: HMAC verification of passphrase failed") from e
+        if hmac.digest(pkey, self.header.enc_key, self.header.hash_algo.name.lower()) != self.header.hmac_enc_key:
+            raise ValueError("Unable to unlock: HMAC verification of passphrase failed")
 
         # Decrypt EKEY using PKEY
-        # TODO: Set counter bit length according to EncAlgo
         ctr = Counter.new(128, initial_value=0, little_endian=True)
         cipher = AES.new(pkey, AES.MODE_CTR, counter=ctr)
-        fkey = cipher.decrypt(self.header.enc_key)
-        self.key = fkey
+        self.key = cipher.decrypt(self.header.enc_key)
 
-        for segment in self.segments:
-            segment.decrypt(self.key)
+    def wrap(self, fh: BinaryIO, index: int) -> ADCryptStream:
+        """Wrap a file handle into an :class:`ADCryptStream` for decryption.
+
+        Args:
+            fh: The file handle to wrap.
+            index: The segment index.
+
+        Raises:
+            ValueError: If the container is not unlocked.
+        """
+        if self.is_locked():
+            raise ValueError("ADCRYPT container is not unlocked")
+
+        return ADCryptStream(fh, self.key, index)
 
 
-class ADCryptSegment:
-    def __init__(self, fh: BinaryIO, index: int):
-        self.index = index
+class ADCryptStream(AlignedStream):
+    def __init__(self, fh: BinaryIO, key: bytes, index: int):
         self.fh = fh
-        self.decrypted = False
+        self.key = key
+        self.index = index
 
-    def __repr__(self) -> str:
-        return f"<ADCryptSegment index={self.index!r} decrypted={self.decrypted!r}>"
+        self.fh.seek(0, io.SEEK_END)
+        size = self.fh.tell() - (512 if index == 0 else 0)  # Skip ADCRYPT header
+        super().__init__(size)
 
-    def decrypt(self, fkey: bytes) -> None:
-        """Prepare this segment for decrypted reading."""
+    def _read(self, offset: int, length: int) -> bytes:
+        self.fh.seek(offset + (512 if self.index == 0 else 0))  # Skip ADCRYPT header
+        buf = self.fh.read(length)
 
-        if self.decrypted:
-            return
+        ctr = Counter.new(
+            128,
+            initial_value=self.index << 64 | (offset // (128 // 8)),
+            little_endian=True,
+        )
+        cipher = AES.new(self.key, AES.MODE_CTR, counter=ctr)
+        return cipher.decrypt(buf)
 
-        # TODO: Set counter bit length according to EncAlgo
-        ctr = Counter.new(128, initial_value=self.index << 64, little_endian=True)
-        cipher = AES.new(fkey, AES.MODE_CTR, counter=ctr)
 
-        # Offset for ADCRYPT header in first segment.
-        # TODO: We should use the header size as offset, it could be different than 512.
-        if self.index == 0:
-            self.fh.seek(512)
+def adcrypt_kdf(
+    passphrase: str | bytes | None,
+    private_key: Path | bytes | None,
+    salt: bytes,
+    key_len: int,
+    count: int,
+    algorithm: str,
+) -> bytes:
+    """Derive the ADCRYPT decryption key.
 
-        self.key = fkey
-        self._cipher = cipher
-        self.decrypted = True
+    Args:
+        passphrase: The passphrase to unlock the container.
+        private_key: The private key to unlock the container.
+        salt: The salt used for key derivation.
+        key_len: The length of the derived key.
+        count: The number of iterations for PBKDF2.
+        algorithm: The hash algorithm to use.
 
-        # TODO: Check for plaintext headers, e.g. b"ADSEGMENTEDFILE", b"ADLOGICALIMAGE", b"EVF\x09\x0d\x0a\xff\x00"
-        # and b"LVF\x09\x0d\x0a\xff\x00".
+    Returns:
+        The derived key as bytes.
+    """
+    if isinstance(passphrase, str):
+        passphrase = passphrase.encode()
 
-    def read(self, blocks: int | None = None) -> bytes:
-        # TODO: Since AES CTR mode is used, we can seek to an offset of the ciphertext and calculate the counter value
-        # based on the offset (random block read).
-        return self._cipher.decrypt(self.fh.read(blocks * 16 if blocks else None))
+    # If a private key was used, the passphrase is empty.
+    passphrase_hash = b""
+    if passphrase is not None and private_key is None:
+        passphrase_hash = hashlib.new(algorithm, passphrase).digest()
+
+    # If no private key was used, the "encrypted" salt is the plaintext salt as-is.
+    derived_salt = salt
+
+    # Decrypt the salt if a private key was provided.
+    if private_key is not None:
+        rsa_key = RSA.import_key(private_key.read_bytes() if isinstance(private_key, Path) else private_key, passphrase)
+        if not (derived_salt := PKCS1_v1_5.new(rsa_key).decrypt(salt, sentinel=None, expected_pt_len=16)):
+            raise ValueError("Failed to decrypt salt using provided private key")
+
+    return PBKDF2(passphrase_hash, derived_salt, key_len, count)

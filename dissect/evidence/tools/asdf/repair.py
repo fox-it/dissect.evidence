@@ -8,7 +8,7 @@ from contextlib import nullcontext
 from pathlib import Path
 
 from dissect.evidence.asdf import asdf
-from dissect.evidence.asdf.streams import HashedStream
+from dissect.evidence.asdf.stream import HashedStream
 
 
 def main() -> int:

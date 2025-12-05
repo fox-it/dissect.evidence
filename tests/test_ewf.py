@@ -30,12 +30,12 @@ def test_ewf_open_segment(MockSegment: MagicMock, monkeypatch: pytest.MonkeyPatc
     assert e._segment_offsets == [2, 4, 6]
     assert e._segment_lru == [2, 3]
 
-    tmp = e.open_segment(0)
+    tmp = e.segment(0)
     assert tmp.offset == 0
     assert tmp.sector_offset == 0
     assert e._segment_lru == [3, 0]
 
-    tmp = e.open_segment(1)
+    tmp = e.segment(1)
     assert tmp.offset == 1024
     assert tmp.sector_offset == 2
     assert e._segment_lru == [0, 1]

@@ -7,7 +7,7 @@ from typing import BinaryIO
 import pytest
 
 from dissect.evidence import ad1
-from dissect.evidence.ad1.ad1 import EntryType, MetaType, find_files
+from dissect.evidence.ad1.ad1 import EntryType, find_files
 from tests._utils import absolute_path
 
 
@@ -15,10 +15,10 @@ def test_ad1(ad1_data: BinaryIO) -> None:
     """Test if we can parse a basic non-segmented AD1 file with no file hierarchy."""
 
     fs = ad1.AD1(ad1_data)
-    assert fs.segments[0].header.magic == b"ADSEGMENTEDFILE\x00"
+    assert fs.segment(0).header.magic == b"ADSEGMENTEDFILE\x00"
 
     assert fs.root.is_dir()
-    assert list(fs.root.listdir()) == ["E:"]
+    assert fs.root.listdir() == ["E:"]
 
     file = fs.get("E:/AD1_test/doc1.txt")
     assert file.is_file()
@@ -32,7 +32,7 @@ def test_ad1_long(ad1_data_long: BinaryIO) -> None:
 
     fs = ad1.AD1(ad1_data_long)
 
-    assert fs.segments[0].header.magic == b"ADSEGMENTEDFILE\x00"
+    assert fs.segment(0).header.magic == b"ADSEGMENTEDFILE\x00"
     assert fs.root.is_dir()
 
     assert [file.name for file in fs.root.children] == ["E:"]
@@ -56,7 +56,7 @@ def test_ad1_long(ad1_data_long: BinaryIO) -> None:
         b"'g'asldjg';askg\r\nkqe\r\n-["
     )
     md5sum = hashlib.md5(entry.open().read())
-    assert md5sum.hexdigest().encode() == next(meta for meta in entry.meta if meta.type == ad1.MetaType.MD5).data
+    assert md5sum.hexdigest() == entry.md5
 
 
 def test_ad1_compressed(ad1_data_compressed: BinaryIO) -> None:
@@ -64,7 +64,7 @@ def test_ad1_compressed(ad1_data_compressed: BinaryIO) -> None:
 
     fs = ad1.AD1(ad1_data_compressed)
 
-    assert fs.segments[0].header.magic == b"ADSEGMENTEDFILE\x00"
+    assert fs.segment(0).header.magic == b"ADSEGMENTEDFILE\x00"
 
     assert fs.get("/").listdir() == ["E:"]
     assert fs.get("E:/AD1_test").listdir() == ["doc1.txt", "doc2.txt"]
@@ -121,14 +121,13 @@ def test_ad1_segmented(ad1_data_segmented: list[BinaryIO]) -> None:
 
     fs = ad1.AD1(ad1_data_segmented)
 
-    assert len(fs.segments) == 4
-    assert len(fs.stream._runs) == 4
-    assert fs.segments[0].number == 1
-    assert fs.segments[0].count == 4
-    assert fs.segments[0].size == 0x200000
+    assert len(fs.fh) == 4
+    assert fs.segment(0).number == 1
+    assert fs.segment(0).count == 4
+    assert fs.segment(0).size == 0x200000 - 512
 
     assert fs.logical_image.version == 4
-    assert fs.logical_image.name == b"C:\\Users\\pcbje\\Desktop\\Data"
+    assert fs.logical_image.name == "C:\\Users\\pcbje\\Desktop\\Data"
 
     dir = fs.get("C:/Users/pcbje/Desktop/Data/Pictures")
     assert dir.is_dir()
@@ -164,5 +163,79 @@ def test_ad1_segmented(ad1_data_segmented: list[BinaryIO]) -> None:
     assert picture.name == "5-0-762-Koala.jpg"
     assert picture.size == 780831
     assert len(buf) == 780831
-    assert picture.get_meta(MetaType.SHA1).data == b"9c3dcb1f9185a314ea25d51aed3b5881b32f420c"
+    assert picture.sha1 == "9c3dcb1f9185a314ea25d51aed3b5881b32f420c"
     assert hashlib.sha1(buf).hexdigest() == "9c3dcb1f9185a314ea25d51aed3b5881b32f420c"
+
+
+def test_adcrypt_passphrase(ad1_data_encrypted_passphrase: list[BinaryIO]) -> None:
+    """Test if we can decrypt ADCRYPT AD1 images, in this example a segmented AD1 logical image."""
+    fs = ad1.AD1(ad1_data_encrypted_passphrase)
+
+    assert fs.is_adcrypt()
+    assert fs.is_locked()
+
+    with pytest.raises(ValueError, match="AD1 container is locked by ADCRYPT"):
+        fs.get("/")
+
+    with pytest.raises(ValueError, match="Unable to unlock: HMAC verification of passphrase failed"):
+        fs.unlock(passphrase="asdf")
+
+    fs.unlock(passphrase="password")
+
+    assert fs.adcrypt.key.hex() == "9030a43f29689a045e815cf4f0ad82b68850063b414f2797f0897e188f98d7b4"
+
+    assert fs.get("C:/Users/User/Downloads").listdir() == [
+        "7z2501-x64.exe",
+        "desktop.ini",
+        "Exterro_FTK_Imager_(x64)-4.7.3.81.exe",
+        "hans-veth-8y--BAFlC9c-unsplash.jpg",
+        "marc-olivier-jodoin-tauPAnOIGvE-unsplash.jpg",
+        "marek-szturc-8Ou3EZmTMWA-unsplash.jpg",
+        "milo-weiler-1AIYdIb3O5M-unsplash.jpg",
+    ]
+
+    for file in fs.get("C:/Users/User/Downloads").iterdir():
+        buf = file.open().read()
+        assert len(buf) == file.size
+        assert hashlib.sha1(buf).hexdigest() == file.sha1
+
+
+def test_adcrypt_certificate(ad1_data_encrypted_certificate: list[BinaryIO]) -> None:
+    """Test if we can decrypt ADCRYPT AD1 images, in this example a segmented AD1 logical image."""
+    fs = ad1.AD1(ad1_data_encrypted_certificate)
+
+    assert fs.is_adcrypt()
+    assert fs.is_locked()
+
+    with pytest.raises(ValueError, match="AD1 container is locked by ADCRYPT"):
+        fs.get("/")
+
+    with pytest.raises(ValueError, match="Unable to unlock: HMAC verification of passphrase failed"):
+        fs.unlock(passphrase="asdf")
+
+    fs.unlock(private_key=absolute_path("_data/ad1/encrypted-certificate/key"))
+
+    assert fs.adcrypt.key.hex() == "6cc0a9f94f944381cc51be474e5da6178059324bb457a87e0035b80f80ff9d4b"
+
+    assert fs.get("C:/Users/User/Downloads").listdir() == [
+        "desktop.ini",
+        "hans-veth-8y--BAFlC9c-unsplash.jpg",
+        "key.pem",
+        "marc-olivier-jodoin-tauPAnOIGvE-unsplash.jpg",
+        "marek-szturc-8Ou3EZmTMWA-unsplash.jpg",
+        "milo-weiler-1AIYdIb3O5M-unsplash.jpg",
+        "programs",
+    ]
+
+    for file in fs.get("C:/Users/User/Downloads").iterdir():
+        if file.is_dir():
+            continue
+
+        buf = file.open().read()
+        assert len(buf) == file.size
+        assert hashlib.sha1(buf).hexdigest() == file.sha1
+
+    assert fs.get("C:/Users/User/Downloads/programs").listdir() == [
+        "7z2501-x64.exe",
+        "Exterro_FTK_Imager_(x64)-4.7.3.81.exe",
+    ]

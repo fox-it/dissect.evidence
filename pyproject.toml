@@ -27,7 +27,6 @@ classifiers = [
 dependencies = [
     "dissect.cstruct>=4,<5",
     "dissect.util>=3,<4",
-    "pycryptodome",
 ]
 dynamic = ["version"]
 
@@ -37,6 +36,9 @@ documentation = "https://docs.dissect.tools/en/latest/projects/dissect.evidence"
 repository = "https://github.com/fox-it/dissect.evidence"
 
 [project.optional-dependencies]
+full = [
+    "pycryptodome",
+]
 dev = [
     "dissect.cstruct>=4.0.dev,<5.0.dev",
     "dissect.util>=3.0.dev,<4.0.dev",
@@ -45,6 +47,7 @@ dev = [
 [dependency-groups]
 test = [
     "pytest",
+    "pycryptodome",
 ]
 lint = [
     "ruff==0.13.1",

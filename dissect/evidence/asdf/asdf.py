@@ -15,8 +15,8 @@ from dissect.util import ts
 from dissect.util.stream import AlignedStream, RangeStream
 
 from dissect.evidence.asdf.c_asdf import c_asdf
-from dissect.evidence.asdf.streams import CompressedStream, Crc32Stream, HashedStream
-from dissect.evidence.exceptions import (
+from dissect.evidence.asdf.stream import CompressedStream, Crc32Stream, HashedStream
+from dissect.evidence.exception import (
     InvalidBlock,
     InvalidSnapshot,
     UnsupportedVersion,

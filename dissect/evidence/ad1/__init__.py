@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dissect.evidence.ad1.ad1 import AD1, AD1LogicalImage, AD1SegmentFile, FileEntry, FileMeta, FileObject, MetaType
-from dissect.evidence.exceptions import (
+from dissect.evidence.ad1.ad1 import AD1, FileEntry, FileMeta, FileStream, LogicalImage, MetaType, SegmentFile
+from dissect.evidence.exception import (
     Error,
     FileNotFoundError,
     NotADirectoryError,
@@ -10,14 +10,14 @@ from dissect.evidence.exceptions import (
 
 __all__ = [
     "AD1",
-    "AD1LogicalImage",
-    "AD1SegmentFile",
     "Error",
     "FileEntry",
     "FileMeta",
     "FileNotFoundError",
-    "FileObject",
+    "FileStream",
+    "LogicalImage",
     "MetaType",
     "NotADirectoryError",
     "NotASymlinkError",
+    "SegmentFile",
 ]
