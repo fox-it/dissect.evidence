@@ -2,19 +2,22 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timezone
-from typing import BinaryIO
+from typing import TYPE_CHECKING, BinaryIO
 
 import pytest
 
-from dissect.evidence import ad1
+from dissect.evidence.ad1 import ad1
 from dissect.evidence.ad1.ad1 import EntryType, find_files
 from tests._utils import absolute_path
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-def test_ad1(ad1_data: BinaryIO) -> None:
+
+def test_ad1(ad1_basic: BinaryIO) -> None:
     """Test if we can parse a basic non-segmented AD1 file with no file hierarchy."""
 
-    fs = ad1.AD1(ad1_data)
+    fs = ad1.AD1(ad1_basic)
     assert fs.segment(0).header.magic == b"ADSEGMENTEDFILE\x00"
 
     assert fs.root.is_dir()
@@ -27,10 +30,10 @@ def test_ad1(ad1_data: BinaryIO) -> None:
     assert file.open().read() == b"Inhoud document 1"
 
 
-def test_ad1_long(ad1_data_long: BinaryIO) -> None:
+def test_ad1_long(ad1_long: BinaryIO) -> None:
     """Test if we can parse a basic non-segmented AD1 file with long file names."""
 
-    fs = ad1.AD1(ad1_data_long)
+    fs = ad1.AD1(ad1_long)
 
     assert fs.segment(0).header.magic == b"ADSEGMENTEDFILE\x00"
     assert fs.root.is_dir()
@@ -59,10 +62,10 @@ def test_ad1_long(ad1_data_long: BinaryIO) -> None:
     assert md5sum.hexdigest() == entry.md5
 
 
-def test_ad1_compressed(ad1_data_compressed: BinaryIO) -> None:
+def test_ad1_compressed(ad1_compressed: BinaryIO) -> None:
     """Test if we can parse a non-segmented AD1 file with standard zlib compression."""
 
-    fs = ad1.AD1(ad1_data_compressed)
+    fs = ad1.AD1(ad1_compressed)
 
     assert fs.segment(0).header.magic == b"ADSEGMENTEDFILE\x00"
 
@@ -112,14 +115,14 @@ def test_ad1_find_files(path: str, expected_files: list[str]) -> None:
     assert [file.name for file in files] == expected_files
 
 
-def test_ad1_segmented(ad1_data_segmented: list[BinaryIO]) -> None:
+def test_ad1_segmented(ad1_segmented: list[Path]) -> None:
     """Test if we can parse segmented AD1 files.
 
     References:
         - https://github.com/pcbje/pyad1/tree/master/test_data
     """
 
-    fs = ad1.AD1(ad1_data_segmented)
+    fs = ad1.AD1(ad1_segmented)
 
     assert len(fs.fh) == 4
     assert fs.segment(0).number == 1
@@ -167,9 +170,9 @@ def test_ad1_segmented(ad1_data_segmented: list[BinaryIO]) -> None:
     assert hashlib.sha1(buf).hexdigest() == "9c3dcb1f9185a314ea25d51aed3b5881b32f420c"
 
 
-def test_adcrypt_passphrase(ad1_data_encrypted_passphrase: list[BinaryIO]) -> None:
+def test_adcrypt_passphrase(ad1_encrypted_passphrase: list[Path]) -> None:
     """Test if we can decrypt ADCRYPT AD1 images, in this example a segmented AD1 logical image."""
-    fs = ad1.AD1(ad1_data_encrypted_passphrase)
+    fs = ad1.AD1(ad1_encrypted_passphrase)
 
     assert fs.is_adcrypt()
     assert fs.is_locked()
@@ -200,9 +203,9 @@ def test_adcrypt_passphrase(ad1_data_encrypted_passphrase: list[BinaryIO]) -> No
         assert hashlib.sha1(buf).hexdigest() == file.sha1
 
 
-def test_adcrypt_certificate(ad1_data_encrypted_certificate: list[BinaryIO]) -> None:
+def test_adcrypt_certificate(ad1_encrypted_certificate: list[Path]) -> None:
     """Test if we can decrypt ADCRYPT AD1 images, in this example a segmented AD1 logical image."""
-    fs = ad1.AD1(ad1_data_encrypted_certificate)
+    fs = ad1.AD1(ad1_encrypted_certificate)
 
     assert fs.is_adcrypt()
     assert fs.is_locked()
@@ -239,3 +242,19 @@ def test_adcrypt_certificate(ad1_data_encrypted_certificate: list[BinaryIO]) -> 
         "7z2501-x64.exe",
         "Exterro_FTK_Imager_(x64)-4.7.3.81.exe",
     ]
+
+
+def test_ad1_segment_lru(ad1_segmented: list[Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ad1, "MAX_OPEN_SEGMENTS", 2)
+
+    fs = ad1.AD1(ad1_segmented)
+    assert fs._segment_lru == [3, 0]
+
+    fs.segment(2)
+    assert fs._segment_lru == [0, 2]
+
+    fs.segment(1)
+    assert fs._segment_lru == [2, 1]
+
+    picture = fs.get("C:/Users/pcbje/Desktop/Data/Pictures/5-0-762-Koala.jpg")
+    assert hashlib.sha1(picture.open().read()).hexdigest() == "9c3dcb1f9185a314ea25d51aed3b5881b32f420c"

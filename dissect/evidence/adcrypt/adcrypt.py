@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import io
 from pathlib import Path
 from typing import BinaryIO
 
-from dissect.util.stream import AlignedStream
-
 from dissect.evidence.adcrypt.c_adcrypt import c_adcrypt
+from dissect.evidence.adcrypt.stream import ADCryptStream
 
 try:
     from Crypto.Cipher import AES, PKCS1_v1_5
@@ -79,7 +77,7 @@ class ADCrypt:
             ValueError: If unlocking failed.
         """
         if not HAS_CRYPTO:
-            raise RuntimeError("Missing required dependency 'pycryptodome' for ADCRYPT decryption.")
+            raise RuntimeError("Missing required dependency 'pycryptodome' for ADCRYPT decryption")
 
         pkey = adcrypt_kdf(
             passphrase,
@@ -113,29 +111,6 @@ class ADCrypt:
             raise ValueError("ADCRYPT container is not unlocked")
 
         return ADCryptStream(fh, self.key, index)
-
-
-class ADCryptStream(AlignedStream):
-    def __init__(self, fh: BinaryIO, key: bytes, index: int):
-        self.fh = fh
-        self.key = key
-        self.index = index
-
-        self.fh.seek(0, io.SEEK_END)
-        size = self.fh.tell() - (512 if index == 0 else 0)  # Skip ADCRYPT header
-        super().__init__(size)
-
-    def _read(self, offset: int, length: int) -> bytes:
-        self.fh.seek(offset + (512 if self.index == 0 else 0))  # Skip ADCRYPT header
-        buf = self.fh.read(length)
-
-        ctr = Counter.new(
-            128,
-            initial_value=self.index << 64 | (offset // (128 // 8)),
-            little_endian=True,
-        )
-        cipher = AES.new(self.key, AES.MODE_CTR, counter=ctr)
-        return cipher.decrypt(buf)
 
 
 def adcrypt_kdf(

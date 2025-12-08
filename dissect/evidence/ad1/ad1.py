@@ -151,6 +151,9 @@ class AD1:
             if segment.header.magic != c_ad1.ADSEGMENTEDFILE_MAGIC.encode():
                 raise ValueError(f"Invalid AD1 segment file magic in segment {i}")
 
+            if segment.number != i + 1:
+                raise ValueError(f"Invalid AD1 segment number in segment {i}, got {segment.number}, expected {i + 1}")
+
             offset += segment.size
             self._segment_offsets.append(offset)
 
