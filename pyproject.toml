@@ -36,6 +36,9 @@ documentation = "https://docs.dissect.tools/en/latest/projects/dissect.evidence"
 repository = "https://github.com/fox-it/dissect.evidence"
 
 [project.optional-dependencies]
+full = [
+    "pycryptodome",
+]
 dev = [
     "dissect.cstruct>=4.0.dev,<5.0.dev",
     "dissect.util>=3.0.dev,<4.0.dev",
@@ -44,6 +47,7 @@ dev = [
 [dependency-groups]
 test = [
     "pytest",
+    "pycryptodome",
 ]
 lint = [
     "ruff==0.13.1",
@@ -66,6 +70,8 @@ asdf-dd = "dissect.evidence.tools.asdf.dd:main"
 asdf-meta = "dissect.evidence.tools.asdf.meta:main"
 asdf-repair = "dissect.evidence.tools.asdf.repair:main"
 asdf-verify = "dissect.evidence.tools.asdf.verify:main"
+
+adcrypt = "dissect.evidence.tools.adcrypt:main"
 
 [tool.ruff]
 line-length = 120
@@ -112,7 +118,8 @@ select = [
 ignore = ["E203", "B904", "UP024", "ANN002", "ANN003", "ANN204", "ANN401", "SIM105", "TRY003"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/docs/**" = ["INP001"]
+"tests/_docs/**" = ["INP001"]
+"*.pyi" = ["E", "F", "PYI"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["dissect.evidence"]

@@ -8,99 +8,14 @@ from functools import lru_cache
 from pathlib import Path
 from typing import BinaryIO
 
-from dissect.cstruct import cstruct
 from dissect.util.stream import AlignedStream
 
-from dissect.evidence.exceptions import EWFError
+from dissect.evidence.ewf import c_ewf
+from dissect.evidence.exception import EWFError
 
 log = logging.getLogger(__name__)
 log.setLevel(os.getenv("DISSECT_LOG_EWF", "CRITICAL"))
 
-ewf_def = """
-enum MediaType : uint8 {
-    Removable   = 0x00,
-    Fixed       = 0x01,
-    Optical     = 0x03,
-    Logical     = 0x0e,
-    RAM         = 0x10
-};
-
-enum MediaFlags : uint8 {
-    Image       = 0x01,
-    Physical    = 0x02,
-    Fastbloc    = 0x04,
-    Tablaeu     = 0x08
-};
-
-enum CompressionLevel : uint8 {
-    None        = 0x00,
-    Good        = 0x01,
-    Best        = 0x02
-};
-
-typedef struct {
-    char        signature[8];
-    uint8       fields_start;
-    uint16      segment_number;
-    uint16      fields_end;
-} EWFHeader;
-
-typedef struct {
-    char    type[16];
-    uint64  next;
-    uint64  size;
-    uint8   pad[40];
-    uint32  checksum;
-} EWFSectionDescriptor;
-
-typedef struct {
-    uint32  reserved_1;
-    uint32  chunk_count;
-    uint32  sector_count;
-    uint32  sector_size;
-    uint32  total_sector_count;
-    uint8   reserved[20];
-    uint8   pad[45];
-    char    signature[5];
-    uint32  checksum;
-} EWFVolumeSectionSpec;
-
-typedef struct {
-    MediaType           media_type;
-    uint8               reserved_1[3];
-    uint32              chunk_count;
-    uint32              sector_count;
-    uint32              sector_size;
-    uint64              total_sector_count;
-    uint32              num_cylinders;
-    uint32              num_heads;
-    uint32              num_sectors;
-    uint8               media_flags;
-    uint8               unknown_1[3];
-    uint32              palm_start_sector;
-    uint32              unknown_2;
-    uint32              smart_start_sector;
-    CompressionLevel    compression_level;
-    uint8               unknown_3[3];
-    uint32              error_granularity;
-    uint32              unknown_4;
-    uint8               uuid[16];
-    uint8               pad[963];
-    char                signature[5];
-    uint32              checksum;
-} EWFVolumeSection;
-
-typedef struct {
-    uint32  num_entries;
-    uint32  _;
-    uint64  base_offset;
-    uint32  _;
-    uint32  checksum;
-    uint32  entries[num_entries];
-} EWFTableSection;
-"""
-
-c_ewf = cstruct().load(ewf_def)
 
 MAX_OPEN_SEGMENTS = 128
 
@@ -124,7 +39,7 @@ def find_files(path: str | Path) -> list[Path]:
 class EWF:
     """Expert Witness Disk Image Format."""
 
-    def __init__(self, fh: BinaryIO | list[BinaryIO]):
+    def __init__(self, fh: BinaryIO | list[BinaryIO] | Path | list[Path]):
         fhs = [fh] if not isinstance(fh, list) else fh
 
         self.fh = fhs
@@ -138,7 +53,7 @@ class EWF:
 
         for i in range(len(fhs)):
             try:
-                segment = self.open_segment(i)
+                segment = self.segment(i)
             except Exception:
                 log.exception("Failed to parse as EWF file: %s", fh)
                 continue
@@ -162,12 +77,12 @@ class EWF:
         self.chunk_size = self.volume.sector_count * self.volume.sector_size
 
         max_size = self.volume.chunk_count * self.volume.sector_count * self.volume.sector_size
-        last_table = self.open_segment(len(self.fh) - 1).tables[-1]
+        last_table = self.segment(len(self.fh) - 1).tables[-1]
         last_chunk_size = len(last_table.read_chunk(last_table.num_entries - 1))
 
         self.size = max_size - (self.chunk_size - last_chunk_size)
 
-    def open_segment(self, idx: int) -> Segment:
+    def segment(self, idx: int) -> Segment:
         # Poor mans LRU
         if idx in self._segments:
             self._segment_lru.remove(idx)
@@ -226,7 +141,7 @@ class EWFStream(AlignedStream):
             if segment_idx > len(self.ewf._segment_offsets):
                 raise EWFError(f"Missing EWF file for segment index: {segment_idx}")
 
-            segment = self.ewf.open_segment(segment_idx)
+            segment = self.ewf.segment(segment_idx)
 
             segment_remaining_sectors = segment.sector_count - (sector_offset - segment.sector_offset)
             segment_sectors = min(segment_remaining_sectors, sector_count)

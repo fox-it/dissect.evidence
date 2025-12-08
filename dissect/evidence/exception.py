@@ -1,6 +1,21 @@
 class Error(Exception):
-    """Base class for exceptions for this module.
-    It is used to recognize errors specific to this module"""
+    pass
+
+
+class FileNotFoundError(Error, FileNotFoundError):
+    pass
+
+
+class IsADirectoryError(Error, IsADirectoryError):
+    pass
+
+
+class NotADirectoryError(Error, NotADirectoryError):
+    pass
+
+
+class NotASymlinkError(Error):
+    pass
 
 
 class EWFError(Error):

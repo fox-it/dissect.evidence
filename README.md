@@ -1,6 +1,6 @@
 # dissect.evidence
 
-A Dissect module implementing a parsers for various forensic evidence file containers, currently: AD1, ASDF and EWF. For
+A Dissect module implementing parsers for various forensic evidence file containers, currently: AD1, ADCRYPT, ASDF and EWF. For
 more information, please see [the documentation](https://docs.dissect.tools/en/latest/projects/dissect.evidence/index.html).
 
 ## Requirements
