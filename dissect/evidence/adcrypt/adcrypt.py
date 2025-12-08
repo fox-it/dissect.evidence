@@ -18,8 +18,6 @@ try:
 except ImportError:
     HAS_CRYPTO = False
 
-MAX_OPEN_SEGMENTS = 128
-
 
 def is_adcrypt(fh: BinaryIO) -> bool:
     """Check if the file handle is an ADCRYPT container.
