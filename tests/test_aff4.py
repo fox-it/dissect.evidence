@@ -7,7 +7,7 @@ from tests.conftest import absolute_path
 
 
 def test_aff4_linear() -> None:
-    aff4 = AFF4(absolute_path("data/aff4/Base-Linear.aff4"))
+    aff4 = AFF4(absolute_path("_data/aff4/Base-Linear.aff4"))
 
     segment = aff4.segment(0)
     assert segment.uri == "aff4://685e15cc-d0fb-4dbc-ba47-48117fc77044"
@@ -25,7 +25,7 @@ def test_aff4_linear() -> None:
 
 
 def test_aff4_allocated() -> None:
-    aff4 = AFF4(absolute_path("data/aff4/Base-Allocated.aff4"))
+    aff4 = AFF4(absolute_path("_data/aff4/Base-Allocated.aff4"))
     assert len(aff4.images()) == 1
 
     image = aff4.images()[0]
@@ -39,7 +39,7 @@ def test_aff4_allocated() -> None:
 
 
 def test_aff4_read_error() -> None:
-    aff4 = AFF4(absolute_path("data/aff4/Base-Linear-ReadError.aff4"))
+    aff4 = AFF4(absolute_path("_data/aff4/Base-Linear-ReadError.aff4"))
     assert len(aff4.images()) == 1
 
     image = aff4.images()[0]
@@ -50,7 +50,7 @@ def test_aff4_read_error() -> None:
 
 
 def test_aff4_exabyte_sparse() -> None:
-    aff4 = AFF4(absolute_path("data/aff4/Base-ExabyteSparse.aff4"))
+    aff4 = AFF4(absolute_path("_data/aff4/Base-ExabyteSparse.aff4"))
     assert len(aff4.images()) == 1
 
     image = aff4.images()[0]
@@ -66,8 +66,8 @@ def test_aff4_exabyte_sparse() -> None:
 def test_aff4_striped() -> None:
     aff4 = AFF4(
         [
-            absolute_path("data/aff4/striped/Base-Linear_1.aff4"),
-            absolute_path("data/aff4/striped/Base-Linear_2.aff4"),
+            absolute_path("_data/aff4/striped/Base-Linear_1.aff4"),
+            absolute_path("_data/aff4/striped/Base-Linear_2.aff4"),
         ]
     )
     assert len(aff4.images()) == 1
