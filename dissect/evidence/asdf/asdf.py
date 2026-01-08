@@ -9,7 +9,7 @@ import tarfile
 import uuid
 from bisect import bisect_right
 from collections import defaultdict
-from typing import TYPE_CHECKING, BinaryIO
+from typing import TYPE_CHECKING, Any, BinaryIO
 
 from dissect.util import ts
 from dissect.util.stream import AlignedStream, RangeStream
@@ -23,7 +23,7 @@ from dissect.evidence.exception import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Iterator, ValuesView
 
 SnapshotTableEntry = tuple[int, int, int, int]
 
@@ -40,6 +40,49 @@ FILE_MAGIC = b"ASDF"
 BLOCK_MAGIC = b"BL\xa5\xdf"
 FOOTER_MAGIC = b"FT\xa5\xdf"
 SPARSE_BYTES = b"\xa5\xdf"
+
+
+class Table:
+    def __init__(self) -> None:
+        self._table: dict[int, list[tuple[int, ...]]] = defaultdict(list)
+        self._lookup: dict[int, list[int]] = defaultdict(list)
+        self._entries = 0
+        self.offset = 0
+
+    def __bool__(self):
+        return bool(self._table)
+
+    def __contains__(self, obj: Any) -> bool:
+        return obj in self._table
+
+    def get(self, index: int) -> tuple[list, list]:
+        return self._table[index], self._lookup[index]
+
+    def add(self, index: int, table_idx: int, entry: tuple, offset: int) -> None:
+        self._table[index].insert(table_idx, entry)
+        self._lookup[index].insert(table_idx, offset)
+        self._entries += 1
+
+    def lookup(self, idx: int) -> list[int]:
+        return self._lookup.get(idx)
+
+    def values(self) -> ValuesView[list[tuple]]:
+        return self._table.values()
+
+    def write(self) -> bytes:
+        result = []
+        for stream_table in self._table.values():
+            for flags, idx, offset, size, file_offset, file_size in stream_table:
+                table_entry = c_asdf.table_entry(
+                    flags=flags,
+                    idx=idx,
+                    offset=offset,
+                    size=size,
+                    file_offset=file_offset,
+                    file_size=file_size,
+                )
+                result.append(table_entry.dumps())
+        return b"".join(result)
 
 
 class AsdfWriter(io.RawIOBase):
@@ -79,9 +122,7 @@ class AsdfWriter(io.RawIOBase):
         self.block_crc = block_crc
         self.block_compress = False  # Disabled for now
 
-        self._table = defaultdict(list)
-        self._table_lookup = defaultdict(list)
-        self._table_offset = 0
+        self._table = Table()
 
         self._meta_buf = io.BytesIO()
         self._meta_tar = tarfile.open(fileobj=self._meta_buf, mode="w")  # noqa: SIM115
@@ -232,8 +273,7 @@ class AsdfWriter(io.RawIOBase):
         """
         absolute_offset = base + offset
 
-        lookup_table = self._table_lookup[idx]
-        entry_table = self._table[idx]
+        entry_table, lookup_table = self._table.get(idx)
 
         table_idx, absolute_offset, size = _table_fit(
             absolute_offset, size, entry_table, lookup_table, lambda e: (e[2], e[3])
@@ -271,9 +311,7 @@ class AsdfWriter(io.RawIOBase):
         outfh.finalize()
 
         data_size = self.fh.tell() - data_offset
-
-        lookup_table.insert(table_idx, absolute_offset)
-        entry_table.insert(table_idx, (flags, idx, absolute_offset, size, block_offset, data_size))
+        self._table.add(idx, table_idx, (flags, idx, absolute_offset, size, block_offset, data_size), absolute_offset)
 
     def _write_meta(self) -> None:
         """Write the metadata tar to the destination file-like object."""
@@ -286,17 +324,7 @@ class AsdfWriter(io.RawIOBase):
     def _write_table(self) -> None:
         """Write the ASDF block table to the destination file-like object."""
         self._table_offset = self.fh.tell()
-        for stream_table in self._table.values():
-            for flags, idx, offset, size, file_offset, file_size in stream_table:
-                table_entry = c_asdf.table_entry(
-                    flags=flags,
-                    idx=idx,
-                    offset=offset,
-                    size=size,
-                    file_offset=file_offset,
-                    file_size=file_size,
-                )
-                table_entry.write(self.fh)
+        self.fh.write(self._table.write())
 
     def _write_footer(self) -> None:
         """Write the ASDF footer to the destination file-like object."""
@@ -327,8 +355,7 @@ class AsdfSnapshot:
         self.timestamp = ts.from_unix(self.header.timestamp)
         self.guid = uuid.UUID(bytes_le=self.header.guid)
 
-        self.table: dict[list[SnapshotTableEntry]] = defaultdict(list)
-        self._table_lookup: dict[list[int]] = defaultdict(list)
+        self.table = Table()
 
         footer_offset = self.fh.seek(-len(c_asdf.footer), io.SEEK_END)
 
@@ -361,11 +388,9 @@ class AsdfSnapshot:
             self._table_insert(block.idx, block.offset, block.size, file_offset)
 
     def _table_insert(self, idx: int, offset: int, size: int, file_offset: int) -> None:
-        stream_idx = idx
         entry_data_offset = file_offset + len(c_asdf.block)
 
-        lookup_table = self._table_lookup[stream_idx]
-        entry_table = self.table[stream_idx]
+        entry_table, lookup_table = self.table.get(idx)
 
         table_idx, entry_offset, entry_size = _table_fit(
             offset, size, entry_table, lookup_table, lambda e: (e[0], e[1])
@@ -375,17 +400,7 @@ class AsdfSnapshot:
             return
 
         entry_data_offset += entry_offset - offset
-
-        lookup_table.insert(table_idx, entry_offset)
-        entry_table.insert(
-            table_idx,
-            (
-                entry_offset,
-                entry_size,
-                file_offset,
-                entry_data_offset,
-            ),
-        )
+        self.table.add(idx, table_idx, (entry_offset, entry_size, file_offset, entry_data_offset), entry_offset)
 
     def contains(self, idx: int) -> bool:
         """Check whether this file contains the given stream index.
@@ -407,12 +422,12 @@ class AsdfSnapshot:
 
     def streams(self) -> Iterator[AsdfStream]:
         """Iterate over all streams in the file."""
-        for i in sorted(self.table.keys()):
+        for i in sorted(self.table._table.keys()):
             yield self.open(i)
 
     def disks(self) -> Iterator[AsdfStream]:
         """Iterate over all non-reserved streams in the file."""
-        for i in sorted(self.table.keys()):
+        for i in sorted(self.table._table.keys()):
             if i in RESERVED_IDX:
                 continue
             yield self.open(i)
@@ -459,8 +474,7 @@ class AsdfStream(AlignedStream):
         self.fh = asdf.fh
         self.asdf = asdf
         self.idx = idx
-        self.table = asdf.table[idx]
-        self._table_lookup = asdf._table_lookup[idx]
+        self.table, self._table_lookup = asdf.table.get(idx)
 
         # We don't actually know the size of the source disk
         # Doesn't really matter though, just take the last run offset + size
