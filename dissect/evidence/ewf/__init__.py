@@ -10,6 +10,7 @@ from dissect.evidence.ewf.ewf import (
     Segment,
     TableSection,
     VolumeSection,
+    find_files,
 )
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "TableSection",
     "VolumeSection",
     "c_ewf",
+    "find_files",
 ]
