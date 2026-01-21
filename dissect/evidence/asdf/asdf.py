@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gzip
 import io
+import itertools
 import shutil
 import tarfile
 import uuid
@@ -41,16 +42,23 @@ BLOCK_MAGIC = b"BL\xa5\xdf"
 FOOTER_MAGIC = b"FT\xa5\xdf"
 SPARSE_BYTES = b"\xa5\xdf"
 
+DEFAULT_NR_OF_ENTRIES = 4 * 1024 * 1024 // len(c_asdf.table_entry)
+
 
 class Table:
-    def __init__(self) -> None:
+    def __init__(self, fh: BinaryIO) -> None:
+        self._fh = fh
         self._table: dict[int, list[tuple[int, ...]]] = defaultdict(list)
+        self._table_offsets: list[tuple[int, list[int]]] = []
         self._lookup: dict[int, list[int]] = defaultdict(list)
         self._entries = 0
         self.offset = 0
 
     def __bool__(self):
         return bool(self._table)
+
+    def __len__(self):
+        return self._entries
 
     def __contains__(self, obj: Any) -> bool:
         return obj in self._table
@@ -63,25 +71,53 @@ class Table:
         self._lookup[index].insert(table_idx, offset)
         self._entries += 1
 
-    def lookup(self, idx: int) -> list[int]:
-        return self._lookup.get(idx)
+    def indexes(self) -> list[int]:
+        indexes = sum(1 << key for key in self._table)
+        return [(indexes >> (x * 64)) & 0xFFFF_FFFF_FFFF_FFFF for x in range(256 // 64)]
 
-    def values(self) -> ValuesView[list[tuple]]:
+    def lookup(self, idx: int) -> list[int]:
+        prev_offset = self._fh.tell()
+        index_index = (idx // 64) - (1 if idx != 0 else 0)
+        look = []
+
+        # Lookup offsets
+        for offset, indexes in sorted(self._table_offsets, key=lambda x: x[0]):
+            index = indexes[index_index]
+            if (1 << (idx % 64)) & index:
+                self._fh.seek(offset, 0)
+                table = c_asdf.table_index(self._fh)
+                count = table.size // len(c_asdf.table_entry)
+                entries = c_asdf.table_entry[count](self._fh.read(table.size))
+                look.extend(filter(lambda x: x.idx == idx, entries))
+        self._fh.seek(prev_offset, 0)
+        if idx in self._table:
+            look.extend(x[2] for x in self._table[idx])
+
+        return look
+
+    def values(self) -> ValuesView[list[tuple[int, ...]]]:
         return self._table.values()
 
     def write(self) -> bytes:
         result = []
-        for stream_table in self._table.values():
-            for flags, idx, offset, size, file_offset, file_size in stream_table:
-                table_entry = c_asdf.table_entry(
-                    flags=flags,
-                    idx=idx,
-                    offset=offset,
-                    size=size,
-                    file_offset=file_offset,
-                    file_size=file_size,
-                )
-                result.append(table_entry.dumps())
+        for flags, idx, offset, size, file_offset, file_size in itertools.chain(*self._table.values()):
+            table_entry = c_asdf.table_entry(
+                flags=flags,
+                idx=idx,
+                offset=offset,
+                size=size,
+                file_offset=file_offset,
+                file_size=file_size,
+            )
+            result.append(table_entry.dumps())
+
+        index = c_asdf.table_index(
+            prev_table=self.offset, size=len(result) * len(c_asdf.table_entry), indexes=self.indexes()
+        )
+        result.insert(0, index.dumps())
+        self._table.clear()
+        self._lookup.clear()
+        self._entries = 0
         return b"".join(result)
 
 
@@ -108,6 +144,7 @@ class AsdfWriter(io.RawIOBase):
         guid: uuid.UUID | None = None,
         compress: bool = False,
         block_crc: bool = True,
+        table_size: int = DEFAULT_NR_OF_ENTRIES,
     ):
         self._fh = fh
         self.fh = self._fh
@@ -122,7 +159,11 @@ class AsdfWriter(io.RawIOBase):
         self.block_crc = block_crc
         self.block_compress = False  # Disabled for now
 
-        self._table = Table()
+        if table_size < 1:
+            raise ValueError("Table size can't be 0 or smaller")
+
+        self._max_entries = table_size
+        self._table = Table(self.fh)
 
         self._meta_buf = io.BytesIO()
         self._meta_tar = tarfile.open(fileobj=self._meta_buf, mode="w")  # noqa: SIM115
@@ -313,6 +354,9 @@ class AsdfWriter(io.RawIOBase):
         data_size = self.fh.tell() - data_offset
         self._table.add(idx, table_idx, (flags, idx, absolute_offset, size, block_offset, data_size), absolute_offset)
 
+        if len(self._table) >= self._max_entries:
+            self._write_table()
+
     def _write_meta(self) -> None:
         """Write the metadata tar to the destination file-like object."""
         self._meta_tar.close()
@@ -323,14 +367,16 @@ class AsdfWriter(io.RawIOBase):
 
     def _write_table(self) -> None:
         """Write the ASDF block table to the destination file-like object."""
-        self._table_offset = self.fh.tell()
+        tmp_offset = self.fh.tell()
+        self._table._table_offsets.append((tmp_offset, self._table.indexes()))
         self.fh.write(self._table.write())
+        self._table.offset = tmp_offset
 
     def _write_footer(self) -> None:
         """Write the ASDF footer to the destination file-like object."""
         footer = c_asdf.footer(
             magic=FOOTER_MAGIC,
-            table_offset=self._table_offset,
+            table_offset=self._table.offset,
             sha256=self.fh.digest(),
         )
         footer.write(self.fh)
@@ -355,7 +401,7 @@ class AsdfSnapshot:
         self.timestamp = ts.from_unix(self.header.timestamp)
         self.guid = uuid.UUID(bytes_le=self.header.guid)
 
-        self.table = Table()
+        self.table = Table(self.fh)
 
         footer_offset = self.fh.seek(-len(c_asdf.footer), io.SEEK_END)
 
@@ -376,11 +422,21 @@ class AsdfSnapshot:
     def _parse_block_table(self, offset: int, count: int) -> None:
         """Parse the block table, getting rid of overlapping blocks."""
         self.fh.seek(offset)
-        table_data = io.BytesIO(self.fh.read(count * len(c_asdf.table_entry)))
 
-        for _ in range(count):
-            entry = c_asdf.table_entry(table_data)
-            self._table_insert(entry.idx, entry.offset, entry.size, entry.file_offset)
+        while True:
+            prev_offset = self.fh.tell()
+            table_index = c_asdf.table_index(self.fh)
+            self.table._table_offsets.append((prev_offset, table_index.indexes))
+            _count = table_index.size // len(c_asdf.table_entry)
+            table_data = io.BytesIO(self.fh.read(table_index.size))
+
+            for _ in range(_count):
+                entry = c_asdf.table_entry(table_data)
+                self._table_insert(entry.idx, entry.offset, entry.size, entry.file_offset)
+
+            if table_index.prev_table in [0, 0xFFFFFFFFFFFFFFFF]:
+                break
+            self.fh.seek(table_index.prev_table)
 
     def _recover_block_table(self) -> None:
         self.fh.seek(len(c_asdf.header))
