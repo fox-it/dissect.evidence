@@ -24,7 +24,7 @@ from dissect.evidence.exception import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, ValuesView
+    from collections.abc import Iterator, ValuesView
 
 SnapshotTableEntry = tuple[int, int, int, int]
 
@@ -48,7 +48,7 @@ DEFAULT_NR_OF_ENTRIES = 4 * 1024 * 1024 // len(c_asdf.table_entry)
 class Table:
     def __init__(self, fh: BinaryIO) -> None:
         self._fh = fh
-        self._table: dict[int, list[tuple[int, ...]]] = defaultdict(list)
+        self._table: dict[int, list[c_asdf.table_entry]] = defaultdict(list)
         self._table_offsets: list[tuple[int, list[int]]] = []
         self._lookup: dict[int, list[int]] = defaultdict(list)
         self._entries = 0
@@ -63,12 +63,12 @@ class Table:
     def __contains__(self, obj: Any) -> bool:
         return obj in self._table
 
-    def get(self, index: int) -> tuple[list, list]:
+    def get(self, index: int) -> tuple[list[c_asdf.table_entry], list[int]]:
         return self._table[index], self._lookup[index]
 
-    def add(self, index: int, table_idx: int, entry: tuple, offset: int) -> None:
-        self._table[index].insert(table_idx, entry)
-        self._lookup[index].insert(table_idx, offset)
+    def add(self, table_idx: int, entry: c_asdf.table_entry) -> None:
+        self._table[entry.idx].insert(table_idx, entry)
+        self._lookup[entry.idx].insert(table_idx, entry.offset)
         self._entries += 1
 
     def indexes(self) -> list[int]:
@@ -88,28 +88,18 @@ class Table:
                 table = c_asdf.table_index(self._fh)
                 count = table.size // len(c_asdf.table_entry)
                 entries = c_asdf.table_entry[count](self._fh.read(table.size))
-                look.extend(filter(lambda x: x.idx == idx, entries))
+                look.extend(entry.offset for entry in filter(lambda x: x.idx == idx, entries))
         self._fh.seek(prev_offset, 0)
         if idx in self._table:
-            look.extend(x[2] for x in self._table[idx])
+            look.extend(entry.offset for entry in self._table[idx])
 
         return look
 
-    def values(self) -> ValuesView[list[tuple[int, ...]]]:
+    def values(self) -> ValuesView[list[c_asdf.table_entry]]:
         return self._table.values()
 
     def write(self) -> bytes:
-        result = []
-        for flags, idx, offset, size, file_offset, file_size in itertools.chain(*self._table.values()):
-            table_entry = c_asdf.table_entry(
-                flags=flags,
-                idx=idx,
-                offset=offset,
-                size=size,
-                file_offset=file_offset,
-                file_size=file_size,
-            )
-            result.append(table_entry.dumps())
+        result = [entry.dumps() for entry in itertools.chain(*self._table.values())]
 
         index = c_asdf.table_index(
             prev_table=self.offset, size=len(result) * len(c_asdf.table_entry), indexes=self.indexes()
@@ -316,9 +306,7 @@ class AsdfWriter(io.RawIOBase):
 
         entry_table, lookup_table = self._table.get(idx)
 
-        table_idx, absolute_offset, size = _table_fit(
-            absolute_offset, size, entry_table, lookup_table, lambda e: (e[2], e[3])
-        )
+        table_idx, absolute_offset, size = _table_fit(absolute_offset, size, entry_table, lookup_table)
 
         if table_idx is None:
             return
@@ -352,7 +340,17 @@ class AsdfWriter(io.RawIOBase):
         outfh.finalize()
 
         data_size = self.fh.tell() - data_offset
-        self._table.add(idx, table_idx, (flags, idx, absolute_offset, size, block_offset, data_size), absolute_offset)
+        self._table.add(
+            table_idx,
+            c_asdf.table_entry(
+                idx=idx,
+                offset=absolute_offset,
+                flags=flags,
+                size=size,
+                file_offset=block_offset,
+                file_size=data_size,
+            ),
+        )
 
         if len(self._table) >= self._max_entries:
             self._write_table()
@@ -448,15 +446,22 @@ class AsdfSnapshot:
 
         entry_table, lookup_table = self.table.get(idx)
 
-        table_idx, entry_offset, entry_size = _table_fit(
-            offset, size, entry_table, lookup_table, lambda e: (e[0], e[1])
-        )
+        table_idx, entry_offset, entry_size = _table_fit(offset, size, entry_table, lookup_table)
 
         if table_idx is None:
             return
 
         entry_data_offset += entry_offset - offset
-        self.table.add(idx, table_idx, (entry_offset, entry_size, file_offset, entry_data_offset), entry_offset)
+        self.table.add(
+            table_idx,
+            c_asdf.table_entry(
+                offset=entry_offset,
+                idx=idx,
+                size=entry_size,
+                file_offset=file_offset,
+                file_size=entry_data_offset,
+            ),
+        )
 
     def contains(self, idx: int) -> bool:
         """Check whether this file contains the given stream index.
@@ -534,7 +539,7 @@ class AsdfStream(AlignedStream):
 
         # We don't actually know the size of the source disk
         # Doesn't really matter though, just take the last run offset + size
-        size = self.table[-1][0] + self.table[-1][1]
+        size = self.table[-1].offset + self.table[-1].size
         super().__init__(size)
 
     def _read(self, offset: int, length: int) -> bytes:
@@ -543,15 +548,13 @@ class AsdfStream(AlignedStream):
         size = self.size
         run_idx = bisect_right(self._table_lookup, offset) - 1
         runlist_len = len(self.table)
-
         while length > 0 and run_idx < runlist_len:
-            run_start, run_size, run_file_offset, run_data_offset = self.table[run_idx]
-            run_end = run_start + run_size
+            entry = self.table[run_idx]
+            # Use file_size of the run_data_offset: FIXME:
+            run_data_offset = entry.file_size
+            run_end = entry.offset + entry.size
 
-            if run_idx + 1 < runlist_len:
-                next_run_start, _, _, _ = self.table[run_idx + 1]
-            else:
-                next_run_start = None
+            next_run_start = self.table[run_idx + 1].offset if (run_idx + 1 < runlist_len) else None
 
             if run_idx < 0:
                 # Missing first block
@@ -580,20 +583,20 @@ class AsdfStream(AlignedStream):
 
                 # Proceed to next run
                 run_idx += 1
-            elif offset < run_start:
+            elif offset < entry.offset:
                 # Previous run consumed, and next run is far away
-                sparse_remaining = run_start - offset
+                sparse_remaining = entry.offset - offset
                 read_count = min(size - offset, min(sparse_remaining, length))
                 result.append(SPARSE_BYTES * (read_count // len(SPARSE_BYTES)))
 
                 # Don't proceed to next run, next loop iteration we'll be within the current run
             else:
                 # We're in a run with data
-                run_pos = offset - run_start
-                run_remaining = run_size - run_pos
+                run_pos = offset - entry.offset
+                run_remaining = entry.size - run_pos
                 read_count = min(size - offset, min(run_remaining, length))
 
-                self.fh.seek(run_file_offset)
+                self.fh.seek(entry.file_offset)
                 if self.fh.read(4) != BLOCK_MAGIC:
                     raise InvalidBlock("invalid block magic")
 
@@ -656,7 +659,10 @@ def scrape_blocks(fh: BinaryIO, buffer_size: int = io.DEFAULT_BUFFER_SIZE) -> It
 
 
 def _table_fit(
-    entry_offset: int, entry_size: int, entry_table: list, lookup_table: list, getentry: Callable
+    entry_offset: int,
+    entry_size: int,
+    entry_table: list[c_asdf.table_entry],
+    lookup_table: list[int],
 ) -> tuple[int, int, int]:
     """Calculate where to insert an entry with the given offset and size into the entry table.
 
@@ -680,10 +686,12 @@ def _table_fit(
 
     table_idx = bisect_right(lookup_table, entry_offset)
     if table_idx > 0:
-        prev_start, prev_size = getentry(entry_table[table_idx - 1])
+        _entry = entry_table[table_idx - 1]
+        prev_start, prev_size = _entry.offset, _entry.size
         prev_end = prev_start + prev_size
     if table_idx < len(lookup_table):
-        next_start, next_size = getentry(entry_table[table_idx])
+        _entry = entry_table[table_idx]
+        next_start, next_size = _entry.offset, _entry.size
         next_end = next_start + next_size
 
     if prev_end and prev_end >= entry_end:
@@ -700,7 +708,8 @@ def _table_fit(
         entry_table.pop(table_idx)
 
         if table_idx < len(lookup_table):
-            next_start, next_size = getentry(entry_table[table_idx])
+            _entry = entry_table[table_idx]
+            next_start, next_size = _entry.offset, _entry.size
             next_end = next_start + next_size
         else:
             next_start, next_end = None, None

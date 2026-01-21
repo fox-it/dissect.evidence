@@ -28,7 +28,7 @@ def test_asdf(asdf_writer: AsdfWriter) -> None:
 
     reader = AsdfSnapshot(asdf_writer._fh)
     stream_0 = reader.open(0)
-    assert [(run_start, run_size) for run_start, run_size, _, _ in stream_0.table] == [
+    assert [(entry.offset, entry.size) for entry in stream_0.table] == [
         (0, 0x1000),
         (0x4000, 0x1000),
         (0x8000, 0x1000),
@@ -79,7 +79,7 @@ def test_asdf_overlap(asdf_writer: AsdfWriter) -> None:
     reader = AsdfSnapshot(asdf_writer._fh)
     stream = reader.open(0)
 
-    assert [(run_start, run_size) for run_start, run_size, _, _ in stream.table] == [
+    assert [(entry.offset, entry.size) for entry in stream.table] == [
         (0, 100),
         (100, 50),
         (150, 50),
@@ -103,7 +103,7 @@ def test_asdf_overlap_all(asdf_writer: AsdfWriter) -> None:
     reader = AsdfSnapshot(asdf_writer._fh)
     stream = reader.open(0)
 
-    assert [(run_start, run_size) for run_start, run_size, _, _ in stream.table] == [
+    assert [(entry.offset, entry.size) for entry in stream.table] == [
         (0, 100),
         (100, 300),
     ]
@@ -124,7 +124,7 @@ def test_asdf_overlap_contiguous(asdf_writer: AsdfWriter) -> None:
     reader = AsdfSnapshot(asdf_writer._fh)
     stream = reader.open(0)
 
-    assert [(run_start, run_size) for run_start, run_size, _, _ in stream.table] == [
+    assert [(entry.offset, entry.size) for entry in stream.table] == [
         (0, 100),
         (100, 100),
     ]
@@ -143,7 +143,7 @@ def test_asdf_overlap_seek(asdf_writer: AsdfWriter) -> None:
     reader = AsdfSnapshot(asdf_writer._fh)
     stream = reader.open(0)
 
-    assert [(run_start, run_size) for run_start, run_size, _, _ in stream.table] == [
+    assert [(entry.offset, entry.size) for entry in stream.table] == [
         (0, 100),
         (100, 100),
         (200, 100),
@@ -237,7 +237,7 @@ def test_asdf_scrape(asdf_writer: AsdfWriter) -> None:
     reader = AsdfSnapshot(asdf_writer._fh, recover=True)
     stream = reader.open(0)
 
-    assert [(run_start, run_size) for run_start, run_size, _, _ in stream.table] == [
+    assert [(entry.offset, entry.size) for entry in stream.table] == [
         (0, 0x1000),
         (0x4000, 0x1000),
         (0x8000, 0x1000),
