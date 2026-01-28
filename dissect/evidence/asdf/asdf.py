@@ -94,24 +94,52 @@ class Table(Generic[T]):
         return [(indexes >> (x * 64)) & OFFSET_MASK for x in range(256 // 64)]
 
     def lookup(self, idx: int) -> list[int]:
+        """Finds the entries specified by the flushed tables"""
         prev_offset = self._fh.tell()
-        index_index = (idx // 64) - (1 if idx != 0 else 0)
-        look = []
+        table_index = (idx // 64) - (1 if idx != 0 else 0)
+        lookup_value = 1 << (idx % 64)
 
-        # Lookup offsets
-        for offset, indexes in sorted(self._table_offsets, key=lambda x: x[0]):
-            index = indexes[index_index]
-            if (1 << (idx % 64)) & index:
-                self._fh.seek(offset, 0)
-                table = c_asdf.table_index(self._fh)
-                count = table.size // len(c_asdf.table_entry)
-                entries = c_asdf.table_entry[count](self._fh.read(table.size))
-                look.extend(entry.offset for entry in filter(lambda x: x.idx == idx, entries))
-        self._fh.seek(prev_offset, 0)
-        if idx in self._table:
-            look.extend(entry.offset for entry in self._table[idx])
+        lookup = []
+        entries = []
 
-        return look
+        # Go through all the tables
+        for offset, table in self._table_offsets:
+            index = table.indexes[table_index]
+            if not (lookup_value & index):
+                continue
+            self._fh.seek(offset + len(c_asdf.table_index), io.SEEK_SET)
+
+            count = table.size // len(c_asdf.table_entry)
+            for entry in c_asdf.table_entry[count](self._fh.read(table.size)):
+                if idx != entry.idx:
+                    continue
+                tab_idx, offset, size = _table_fit(entry.offset, entry.size, entries, lookup)
+                if tab_idx is None:
+                    continue
+                entry.offset = offset
+                entry.size = size
+                entries.insert(tab_idx, entry)
+                lookup.insert(tab_idx, offset)
+
+        self._fh.seek(prev_offset, io.SEEK_SET)
+
+        for entry in self._table.get(idx, []):
+            tab_idx, offset, size = _table_fit(entry.offset, entry.size, entries, lookup)
+            if tab_idx is None:
+                continue
+            _entry = c_asdf.table_entry(
+                idx=idx,
+                flags=entry.flags,
+                offset=offset,
+                size=size,
+                file_size=entry.file_size,
+                file_offset=entry.file_offset,
+            )
+
+            entries.insert(tab_idx, _entry)
+            lookup.insert(tab_idx, offset)
+
+        return lookup
 
     def values(self) -> ValuesView[list[T]]:
         return self._table.values()
@@ -442,21 +470,28 @@ class AsdfSnapshot:
     def _parse_block_table(self, offset: int, count: int) -> None:
         """Parse the block table, getting rid of overlapping blocks."""
         self.fh.seek(offset)
+        table_offsets = []
 
+        # Read all the tables and their offsets in reverse order
         while True:
-            prev_offset = self.fh.tell()
+            table_offset = self.fh.tell()
             table_index = c_asdf.table_index(self.fh)
-            self.table._table_offsets.append((prev_offset, table_index.indexes))
+            table_offsets.append((table_offset, table_index))
+            if table_index.prev_table == OFFSET_MASK:
+                break
+            self.fh.seek(table_index.prev_table)
+
+        table_offsets.reverse()
+        self.table._table_offsets = table_offsets
+
+        # Read all the table entries and add them to the table
+        for offset, table_index in table_offsets:
+            self.fh.seek(offset + len(c_asdf.table_index))
             _count = table_index.size // len(c_asdf.table_entry)
             table_data = io.BytesIO(self.fh.read(table_index.size))
 
-            for _ in range(_count):
-                entry = c_asdf.table_entry(table_data)
+            for entry in c_asdf.table_entry[_count](table_data):
                 self._table_insert(entry.idx, entry.offset, entry.size, entry.file_offset)
-
-            if table_index.prev_table in [0, 0xFFFFFFFFFFFFFFFF]:
-                break
-            self.fh.seek(table_index.prev_table)
 
     def _recover_block_table(self) -> None:
         self.fh.seek(len(c_asdf.header))
