@@ -32,6 +32,7 @@ SnapshotTableEntry = tuple[int, int, int, int]
 VERSION = 1
 DEFAULT_BLOCK_SIZE = 4096
 MAX_BLOCK_TABLE_SIZE = 2**32
+OFFSET_MASK = (1 << 64) - 1
 
 MAX_IDX = 253
 IDX_MEMORY = 254
@@ -67,8 +68,9 @@ class Table(Generic[T]):
         self._table_offsets: list[tuple[int, c_asdf.table_index]] = []
         self._table: dict[int, list[T]] = defaultdict(list)
         self._lookup: dict[int, list[int]] = defaultdict(list)
+
         self._entries = 0
-        self.offset = 0
+        self.prev_table_offset = OFFSET_MASK
 
     def __bool__(self):
         return bool(self._table)
@@ -89,7 +91,7 @@ class Table(Generic[T]):
 
     def indexes(self) -> list[int]:
         indexes = sum(1 << key for key in self._table)
-        return [(indexes >> (x * 64)) & 0xFFFF_FFFF_FFFF_FFFF for x in range(256 // 64)]
+        return [(indexes >> (x * 64)) & OFFSET_MASK for x in range(256 // 64)]
 
     def lookup(self, idx: int) -> list[int]:
         prev_offset = self._fh.tell()
@@ -114,13 +116,20 @@ class Table(Generic[T]):
     def values(self) -> ValuesView[list[T]]:
         return self._table.values()
 
-    def write(self) -> bytes:
+    def write(self, table_offset: int = -1) -> bytes:
+        """Creates a table to be writen to the fileheader"""
+        indexes = self.indexes()
         result = [entry.dumps() for entry in itertools.chain(*self._table.values())]
 
         index = c_asdf.table_index(
-            prev_table=self.offset, size=len(result) * len(c_asdf.table_entry), indexes=self.indexes()
+            prev_table=self.prev_table_offset, size=len(result) * len(c_asdf.table_entry), indexes=indexes
         )
         result.insert(0, index.dumps())
+
+        if table_offset != -1:
+            self.prev_table_offset = table_offset
+            self._table_offsets.append((table_offset, index))
+
         self._table.clear()
         self._lookup.clear()
         self._entries = 0
@@ -381,16 +390,13 @@ class AsdfWriter(io.RawIOBase):
 
     def _write_table(self) -> None:
         """Write the ASDF block table to the destination file-like object."""
-        tmp_offset = self.fh.tell()
-        self._table._table_offsets.append((tmp_offset, self._table.indexes()))
-        self.fh.write(self._table.write())
-        self._table.offset = tmp_offset
+        self.fh.write(self._table.write(self.fh.tell()))
 
     def _write_footer(self) -> None:
         """Write the ASDF footer to the destination file-like object."""
         footer = c_asdf.footer(
             magic=FOOTER_MAGIC,
-            table_offset=self._table.offset,
+            table_offset=self._table.prev_table_offset,
             sha256=self.fh.digest(),
         )
         footer.write(self.fh)
