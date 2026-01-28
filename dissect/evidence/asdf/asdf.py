@@ -670,7 +670,7 @@ class AsdfStream(AlignedStream):
         return b"".join(result)
 
 
-def scrape_blocks(fh: BinaryIO, buffer_size: int = io.DEFAULT_BUFFER_SIZE) -> Iterator[c_asdf.block, int]:
+def scrape_blocks(fh: BinaryIO, buffer_size: int = io.DEFAULT_BUFFER_SIZE) -> Iterator[tuple[c_asdf.block, int]]:
     """Scrape for block headers in ``fh`` and yield parsed block headers and their offset.
 
     Args:
@@ -720,7 +720,7 @@ def _table_fit(
     entry_size: int,
     entry_table: list[T],
     lookup_table: list[int],
-) -> tuple[int, int, int]:
+) -> tuple[int | None, int | None, int | None]:
     """Calculate where to insert an entry with the given offset and size into the entry table.
 
     Moves or shrinks the entry to prevent block overlap, and remove any overlapping blocks.
