@@ -10,7 +10,8 @@ import tarfile
 import uuid
 from bisect import bisect_right
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, BinaryIO
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, BinaryIO, Generic, TypeVar
 
 from dissect.util import ts
 from dissect.util.stream import AlignedStream, RangeStream
@@ -45,11 +46,26 @@ SPARSE_BYTES = b"\xa5\xdf"
 DEFAULT_NR_OF_ENTRIES = 4 * 1024 * 1024 // len(c_asdf.table_entry)
 
 
-class Table:
+@dataclass
+class ReadEntry:
+    idx: int
+    offset: int
+    size: int
+    file_offset: int
+    data_offset: int
+
+    def dumps(self) -> bytes:
+        return b""
+
+
+T = TypeVar("T", ReadEntry, c_asdf.table_entry)
+
+
+class Table(Generic[T]):
     def __init__(self, fh: BinaryIO) -> None:
         self._fh = fh
-        self._table: dict[int, list[c_asdf.table_entry]] = defaultdict(list)
-        self._table_offsets: list[tuple[int, list[int]]] = []
+        self._table_offsets: list[tuple[int, c_asdf.table_index]] = []
+        self._table: dict[int, list[T]] = defaultdict(list)
         self._lookup: dict[int, list[int]] = defaultdict(list)
         self._entries = 0
         self.offset = 0
@@ -63,10 +79,10 @@ class Table:
     def __contains__(self, obj: Any) -> bool:
         return obj in self._table
 
-    def get(self, index: int) -> tuple[list[c_asdf.table_entry], list[int]]:
+    def get(self, index: int) -> tuple[list[T], list[int]]:
         return self._table[index], self._lookup[index]
 
-    def add(self, table_idx: int, entry: c_asdf.table_entry) -> None:
+    def add(self, table_idx: int, entry: T) -> None:
         self._table[entry.idx].insert(table_idx, entry)
         self._lookup[entry.idx].insert(table_idx, entry.offset)
         self._entries += 1
@@ -95,7 +111,7 @@ class Table:
 
         return look
 
-    def values(self) -> ValuesView[list[c_asdf.table_entry]]:
+    def values(self) -> ValuesView[list[T]]:
         return self._table.values()
 
     def write(self) -> bytes:
@@ -153,7 +169,7 @@ class AsdfWriter(io.RawIOBase):
             raise ValueError("Table size can't be 0 or smaller")
 
         self._max_entries = table_size
-        self._table = Table(self.fh)
+        self._table = Table[c_asdf.table_entry](self.fh)
 
         self._meta_buf = io.BytesIO()
         self._meta_tar = tarfile.open(fileobj=self._meta_buf, mode="w")  # noqa: SIM115
@@ -399,7 +415,7 @@ class AsdfSnapshot:
         self.timestamp = ts.from_unix(self.header.timestamp)
         self.guid = uuid.UUID(bytes_le=self.header.guid)
 
-        self.table = Table(self.fh)
+        self.table = Table[ReadEntry](self.fh)
 
         footer_offset = self.fh.seek(-len(c_asdf.footer), io.SEEK_END)
 
@@ -452,14 +468,15 @@ class AsdfSnapshot:
             return
 
         entry_data_offset += entry_offset - offset
+
         self.table.add(
             table_idx,
-            c_asdf.table_entry(
-                offset=entry_offset,
+            ReadEntry(
                 idx=idx,
+                offset=entry_offset,
                 size=entry_size,
                 file_offset=file_offset,
-                file_size=entry_data_offset,
+                data_offset=entry_data_offset,
             ),
         )
 
@@ -550,8 +567,7 @@ class AsdfStream(AlignedStream):
         runlist_len = len(self.table)
         while length > 0 and run_idx < runlist_len:
             entry = self.table[run_idx]
-            # Use file_size of the run_data_offset: FIXME:
-            run_data_offset = entry.file_size
+            run_data_offset = entry.data_offset
             run_end = entry.offset + entry.size
 
             next_run_start = self.table[run_idx + 1].offset if (run_idx + 1 < runlist_len) else None
@@ -661,7 +677,7 @@ def scrape_blocks(fh: BinaryIO, buffer_size: int = io.DEFAULT_BUFFER_SIZE) -> It
 def _table_fit(
     entry_offset: int,
     entry_size: int,
-    entry_table: list[c_asdf.table_entry],
+    entry_table: list[T],
     lookup_table: list[int],
 ) -> tuple[int, int, int]:
     """Calculate where to insert an entry with the given offset and size into the entry table.
