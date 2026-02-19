@@ -44,7 +44,7 @@ BLOCK_MAGIC = b"BL\xa5\xdf"
 FOOTER_MAGIC = b"FT\xa5\xdf"
 SPARSE_BYTES = b"\xa5\xdf"
 
-DEFAULT_NR_OF_ENTRIES = 4 * 1024 * 1024 // len(c_asdf.table_entry)
+DEFAULT_TABLE_SIZE = 4 * 1024 * 1024 // len(c_asdf.table_entry)
 
 
 @dataclass(slots=True)
@@ -234,7 +234,7 @@ class AsdfWriter(io.RawIOBase):
         guid: uuid.UUID | None = None,
         compress: bool = False,
         block_crc: bool = True,
-        table_size: int = DEFAULT_NR_OF_ENTRIES,
+        table_size: int = DEFAULT_TABLE_SIZE,
     ):
         self._fh = fh
         self.fh = self._fh
