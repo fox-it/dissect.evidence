@@ -25,7 +25,7 @@ from dissect.evidence.exception import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, ValuesView
+    from collections.abc import Iterator, KeysView, ValuesView
 
 SnapshotTableEntry = tuple[int, int, int, int]
 
@@ -190,6 +190,9 @@ class Table(Generic[T]):
 
     def values(self) -> ValuesView[list[T]]:
         return self._table.values()
+
+    def keys(self) -> KeysView[int]:
+        return self._table.keys()
 
     def write(self, fh: BinaryIO) -> None:
         """Writes a table directly to the fileheader"""
@@ -589,12 +592,12 @@ class AsdfSnapshot:
 
     def streams(self) -> Iterator[AsdfStream]:
         """Iterate over all streams in the file."""
-        for i in sorted(self.table._table.keys()):
+        for i in sorted(self.table.keys()):
             yield self.open(i)
 
     def disks(self) -> Iterator[AsdfStream]:
         """Iterate over all non-reserved streams in the file."""
-        for i in sorted(self.table._table.keys()):
+        for i in sorted(self.table.keys()):
             if i in RESERVED_IDX:
                 continue
             yield self.open(i)
