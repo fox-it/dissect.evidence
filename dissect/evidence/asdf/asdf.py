@@ -380,8 +380,8 @@ class AsdfWriter(io.RawIOBase):
         """
         super().close()
         self._write_meta()
-        if self._table:
-            self._write_table()
+        if len(self._table):
+            self.flush()
         self._write_footer()
         self.fh.close()
 
@@ -457,7 +457,7 @@ class AsdfWriter(io.RawIOBase):
         )
 
         if len(self._table) >= self._max_entries:
-            self._write_table()
+            self.flush()
 
     def _write_meta(self) -> None:
         """Write the metadata tar to the destination file-like object."""
@@ -467,7 +467,7 @@ class AsdfWriter(io.RawIOBase):
         self._meta_buf.seek(0)
         self.copy_bytes(self._meta_buf, 0, size, idx=IDX_METADATA)
 
-    def _write_table(self) -> None:
+    def flush(self) -> None:
         """Write the ASDF block table to the destination file-like object."""
         self._table.write(self.fh)
 
