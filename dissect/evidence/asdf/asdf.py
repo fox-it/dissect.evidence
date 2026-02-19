@@ -191,24 +191,25 @@ class Table(Generic[T]):
     def values(self) -> ValuesView[list[T]]:
         return self._table.values()
 
-    def write(self, table_offset: int = -1) -> bytes:
+    def write(self, fh: BinaryIO) -> None:
         """Writes a table directly to the fileheader"""
         indexes = self.indexes()
         result = [entry.dumps() for entry in itertools.chain(*self._table.values())]
 
         index = c_asdf.table_index(
-            prev_table=self.prev_table_offset, size=len(result) * len(c_asdf.table_entry), indexes=indexes
+            prev_table=self.last_table_offset, size=len(result) * len(c_asdf.table_entry), indexes=indexes
         )
         result.insert(0, index.dumps())
 
-        if table_offset != -1:
-            self.prev_table_offset = table_offset
-            self._table_offsets.append((table_offset, index))
+        table_offset = fh.tell()
+        self.last_table_offset = table_offset
+        self._table_offsets.append((table_offset, index))
+
+        fh.writelines(result)
 
         self._table.clear()
         self._lookup.clear()
         self._entries = 0
-        return b"".join(result)
 
 
 class AsdfWriter(io.RawIOBase):
@@ -465,7 +466,7 @@ class AsdfWriter(io.RawIOBase):
 
     def _write_table(self) -> None:
         """Write the ASDF block table to the destination file-like object."""
-        self.fh.write(self._table.write(self.fh.tell()))
+        self._table.write(self.fh)
 
     def _write_footer(self) -> None:
         """Write the ASDF footer to the destination file-like object."""
