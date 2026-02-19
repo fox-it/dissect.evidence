@@ -31,10 +31,11 @@ struct block {
     uint64      size;           // Size of block in stream
 };
 
+// A structure to keep track of previously flushed tables
 struct table_index {
-    uint64      prev_table;     // Offset of the previous table FFFFFFFFF denotes last table
+    uint64      prev_table;     // Offset of the previous table 0xFFFFFFFF_FFFFFFF denotes last table
     uint64      size;           // Amount of bytes of the table
-    uint64      indexes[4];     // Which table entries are inside
+    uint64      indexes[4];     // Which stream indexes are available inside the table
 };
 
 struct table_entry {

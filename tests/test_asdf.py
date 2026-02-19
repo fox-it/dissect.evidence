@@ -62,16 +62,16 @@ def test_asdf(asdf_writer: AsdfWriter) -> None:
 def test_asdf_overlap(asdf_writer: AsdfWriter) -> None:
     asdf_writer.add_bytes(b"\x01" * 100, base=0)
     asdf_writer.add_bytes(b"\x02" * 100, base=200)
-    assert asdf_writer._table.lookup(0) == [0, 200]
+    assert asdf_writer._table.lookup(0, asdf_writer._fh) == [0, 200]
 
     asdf_writer.add_bytes(b"\x03" * 100, base=50)
-    assert asdf_writer._table.lookup(0) == [0, 100, 200]
+    assert asdf_writer._table.lookup(0, asdf_writer._fh) == [0, 100, 200]
 
     asdf_writer.add_bytes(b"\x04" * 150, base=100)
-    assert asdf_writer._table.lookup(0) == [0, 100, 150, 200]
+    assert asdf_writer._table.lookup(0, asdf_writer._fh) == [0, 100, 150, 200]
 
     asdf_writer.add_bytes(b"\x05" * 50, base=25)
-    assert asdf_writer._table.lookup(0) == [0, 100, 150, 200]
+    assert asdf_writer._table.lookup(0, asdf_writer._fh) == [0, 100, 150, 200]
 
     asdf_writer.close()
     asdf_writer._fh.seek(0)
@@ -93,9 +93,9 @@ def test_asdf_overlap_all(asdf_writer: AsdfWriter) -> None:
     asdf_writer.add_bytes(b"\x02" * 100, base=200)
     asdf_writer.add_bytes(b"\x03" * 100, base=50)
     asdf_writer.add_bytes(b"\x04" * 150, base=100)
-    assert asdf_writer._table.lookup(0) == [0, 100, 150, 200]
+    assert asdf_writer._table.lookup(0, asdf_writer._fh) == [0, 100, 150, 200]
     asdf_writer.add_bytes(b"\x06" * 400, base=0)
-    assert asdf_writer._table.lookup(0) == [0, 100]
+    assert asdf_writer._table.lookup(0, asdf_writer._fh) == [0, 100]
 
     asdf_writer.close()
     asdf_writer._fh.seek(0)
@@ -113,10 +113,10 @@ def test_asdf_overlap_all(asdf_writer: AsdfWriter) -> None:
 def test_asdf_overlap_contiguous(asdf_writer: AsdfWriter) -> None:
     asdf_writer.add_bytes(b"\x01" * 100, base=0)
     asdf_writer.add_bytes(b"\x02" * 100, base=100)
-    assert asdf_writer._table.lookup(0) == [0, 100]
+    assert asdf_writer._table.lookup(0, asdf_writer._fh) == [0, 100]
 
     asdf_writer.add_bytes(b"\x03" * 75, base=50)
-    assert asdf_writer._table.lookup(0) == [0, 100]
+    assert asdf_writer._table.lookup(0, asdf_writer._fh) == [0, 100]
 
     asdf_writer.close()
     asdf_writer._fh.seek(0)
@@ -135,7 +135,7 @@ def test_asdf_overlap_seek(asdf_writer: AsdfWriter) -> None:
     asdf_writer.add_bytes(b"\x00" * 100, base=0)
     asdf_writer.add_bytes(b"\x00" * 100, base=200)
     asdf_writer.add_bytes(bytes(range(200)), base=50)
-    assert asdf_writer._table.lookup(0) == [0, 100, 200]
+    assert asdf_writer._table.lookup(0, asdf_writer._fh) == [0, 100, 200]
 
     asdf_writer.close()
     asdf_writer._fh.seek(0)
