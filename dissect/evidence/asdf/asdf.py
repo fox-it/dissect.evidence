@@ -88,7 +88,7 @@ class Table(Generic[T]):
         self._lookup = defaultdict(list)
 
         self._entries = 0
-        self.prev_table_offset = OFFSET_MASK
+        self.last_table_offset = OFFSET_MASK
 
     def __bool__(self):
         return bool(self._table)
@@ -472,7 +472,7 @@ class AsdfWriter(io.RawIOBase):
         """Write the ASDF footer to the destination file-like object."""
         footer = c_asdf.footer(
             magic=FOOTER_MAGIC,
-            table_offset=self._table.prev_table_offset,
+            table_offset=self._table.last_table_offset,
             sha256=self.fh.digest(),
         )
         footer.write(self.fh)
