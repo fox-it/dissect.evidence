@@ -32,7 +32,8 @@ SnapshotTableEntry = tuple[int, int, int, int]
 VERSION = 1
 DEFAULT_BLOCK_SIZE = 4096
 MAX_BLOCK_TABLE_SIZE = 2**32
-OFFSET_MASK = (1 << 64) - 1
+NO_PREVIOUS_TABLE = (1 << 64) - 1
+INDEX_MASK = NO_PREVIOUS_TABLE
 
 MAX_IDX = 253
 IDX_MEMORY = 254
@@ -88,7 +89,7 @@ class Table(Generic[T]):
         self._lookup = defaultdict(list)
 
         self._entries = 0
-        self.last_table_offset = OFFSET_MASK
+        self.last_table_offset = NO_PREVIOUS_TABLE
 
     def __bool__(self):
         return bool(self._table)
@@ -114,7 +115,7 @@ class Table(Generic[T]):
         The bit string gets divided into 4 64-bit numbers.
         """
         indexes = sum(1 << key for key in self._table)
-        return [(indexes >> (x * 64)) & OFFSET_MASK for x in range(256 // 64)]
+        return [(indexes >> (x * 64)) & INDEX_MASK for x in range(4)]
 
     def lookup(self, idx: int, fh: BinaryIO) -> list[int]:
         """Finds entries belonging to a stream index inside of any flushed table.
@@ -528,7 +529,7 @@ class AsdfSnapshot:
             table_offset = self.fh.tell()
             table_index = c_asdf.table_index(self.fh)
             table_offsets.append((table_offset, table_index))
-            if table_index.prev_table == OFFSET_MASK:
+            if table_index.prev_table == NO_PREVIOUS_TABLE:
                 break
             self.fh.seek(table_index.prev_table)
 
