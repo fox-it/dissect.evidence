@@ -440,7 +440,6 @@ class FileMeta:
 
 def convert_ts(value: bytes) -> datetime:
     """Convert an AD1 timestamp to datetime object. Assuming this is UTC."""
-
     # DateCreated does not (always) have ``.%f`` precision.
     fmt = "%Y%m%dT%H%M%S.%f" if b"." in value else "%Y%m%dT%H%M%S"
     return datetime.strptime(value.decode(), fmt).replace(tzinfo=timezone.utc)

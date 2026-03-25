@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 
 def test_ad1(ad1_basic: BinaryIO) -> None:
     """Test if we can parse a basic non-segmented AD1 file with no file hierarchy."""
-
     fs = ad1.AD1(ad1_basic)
     assert fs.segment(0).header.magic == b"ADSEGMENTEDFILE\x00"
 
@@ -32,7 +31,6 @@ def test_ad1(ad1_basic: BinaryIO) -> None:
 
 def test_ad1_long(ad1_long: BinaryIO) -> None:
     """Test if we can parse a basic non-segmented AD1 file with long file names."""
-
     fs = ad1.AD1(ad1_long)
 
     assert fs.segment(0).header.magic == b"ADSEGMENTEDFILE\x00"
@@ -64,7 +62,6 @@ def test_ad1_long(ad1_long: BinaryIO) -> None:
 
 def test_ad1_compressed(ad1_compressed: BinaryIO) -> None:
     """Test if we can parse a non-segmented AD1 file with standard zlib compression."""
-
     fs = ad1.AD1(ad1_compressed)
 
     assert fs.segment(0).header.magic == b"ADSEGMENTEDFILE\x00"
@@ -110,7 +107,6 @@ def test_ad1_compressed(ad1_compressed: BinaryIO) -> None:
 )
 def test_ad1_find_files(path: str, expected_files: list[str]) -> None:
     """Test if we correctly find and order segmented AD1 files and do not find .txt or .csv artifact files."""
-
     files = find_files(absolute_path(path))
     assert [file.name for file in files] == expected_files
 
@@ -121,7 +117,6 @@ def test_ad1_segmented(ad1_segmented: list[Path]) -> None:
     References:
         - https://github.com/pcbje/pyad1/tree/master/test_data
     """
-
     fs = ad1.AD1(ad1_segmented)
 
     assert len(fs.fh) == 4

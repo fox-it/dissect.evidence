@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 
 def test_adcrypt_passphrase(tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test if we can decrypt ADCRYPT AD1 images using the adcrypt tool."""
-
     with caplog.at_level(logging.DEBUG, adcrypt.log.name), monkeypatch.context() as m:
         m.setattr(
             "sys.argv",
@@ -46,7 +45,6 @@ def test_adcrypt_passphrase(tmp_path: Path, caplog: pytest.LogCaptureFixture, mo
 
 def test_adcrypt_certificate(tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test if we can decrypt ADCRYPT AD1 images using the adcrypt tool."""
-
     with caplog.at_level(logging.DEBUG, adcrypt.log.name), monkeypatch.context() as m:
         m.setattr(
             "sys.argv",
