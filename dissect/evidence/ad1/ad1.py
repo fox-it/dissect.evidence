@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 from functools import cached_property
-from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, BinaryIO
 
 from dissect.evidence.ad1.c_ad1 import c_ad1
@@ -13,6 +13,7 @@ from dissect.evidence.exception import FileNotFoundError, NotADirectoryError, No
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import PurePath
 
 EntryType = c_ad1.EntryType
 MetaType = c_ad1.MetaType

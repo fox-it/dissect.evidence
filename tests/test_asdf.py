@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import zlib
 from io import BytesIO
+from typing import TYPE_CHECKING
 
 import pytest
 
-from dissect.evidence.asdf.asdf import AsdfSnapshot, AsdfWriter
+from dissect.evidence.asdf.asdf import AsdfSnapshot
 from dissect.evidence.asdf.stream import CompressedStream, Crc32Stream, HashedStream
 from dissect.evidence.exception import InvalidSnapshot
+
+if TYPE_CHECKING:
+    from dissect.evidence.asdf.asdf import AsdfWriter
 
 
 def test_asdf(asdf_writer: AsdfWriter) -> None:
