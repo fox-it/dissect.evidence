@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+
 class Error(Exception):
     pass
 
@@ -19,16 +22,16 @@ class NotASymlinkError(Error):
 
 
 class EWFError(Error):
-    """Related to EWF (Expert Witness disk image Format)"""
+    """Related to EWF (Expert Witness disk image Format)."""
 
 
 class InvalidSnapshot(Error):
-    """Related to ASDF (Acquire Snapshot Data Format)"""
+    """Related to ASDF (Acquire Snapshot Data Format)."""
 
 
 class InvalidBlock(Error):
-    """Related to ASDF (Acquire Snapshot Data Format)"""
+    """Related to ASDF (Acquire Snapshot Data Format)."""
 
 
 class UnsupportedVersion(Error):
-    """Related to ASDF (Acquire Snapshot Data Format)"""
+    """Related to ASDF (Acquire Snapshot Data Format)."""
