@@ -24,9 +24,7 @@ from dissect.evidence.exception import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, KeysView, ValuesView
-
-SnapshotTableEntry = tuple[int, int, int, int]
+    from collections.abc import Iterator
 
 VERSION = 1
 DEFAULT_BLOCK_SIZE = 4096
@@ -47,22 +45,19 @@ SPARSE_BYTES = b"\xa5\xdf"
 DEFAULT_TABLE_SIZE = 4 * 1024 * 1024 // len(c_asdf.table_entry)
 
 
-class Table:
-    """A single point for the table entries to get collected for reading and writing."""
+class WriteTable:
+    """Writes entries to a file header once a certain point gets reached."""
 
     _table: dict[int, list[c_asdf.table_entry]]
     """Keeps an order for the table entries for a specific stream"""
     _lookup: dict[int, list[int]]
     """Keeps an order for all the stream offsets for a specific stream"""
-    _table_offsets: list[tuple[int, c_asdf.table_index]]
-    """Keeps account of any previously flushed table, containing both its start offset and table_index."""
     _entries: int
     """The current number of entries inside of the table"""
     last_table_offset: int
     """Offset of the previously flushed table"""
 
     def __init__(self) -> None:
-        self._table_offsets = []
         self._table = defaultdict(list)
         self._lookup = defaultdict(list)
 
@@ -74,9 +69,6 @@ class Table:
 
     def __len__(self):
         return self._entries
-
-    def __contains__(self, obj: Any) -> bool:
-        return obj in self._table
 
     def get(self, index: int) -> tuple[list[c_asdf.table_entry], list[int]]:
         return self._table[index], self._lookup[index]
@@ -95,89 +87,10 @@ class Table:
         indexes = sum(1 << key for key in self._table)
         return [(indexes >> (x * 64)) & INDEX_MASK for x in range(4)]
 
-    def lookup(self, idx: int, fh: BinaryIO) -> list[int]:
-        """Finds entries belonging to a stream index inside of any flushed table.
-
-        In the worst case scenario, where a table gets flushed every time an entry gets added to it,
-        the lookup function finds all the offsets and returns it in the correct order.
-
-        TODO: Only returns the offsets for now, can be rewritten and reused for :class:`.ASDFSnapshot`.
-
-        Args:
-            idx: The stream idx which we want to lookup
-            fh: The filehandle of the asdf file.
-
-        Returns:
-            a list of offsets of a specific stream.
-        """
-        prev_offset = fh.tell()
-        # Which parts of table.indexes to look into for a stream
-        index_idx = (idx // 64) - (1 if idx != 0 else 0)
-        lookup_value = 1 << (idx % 64)
-
-        lookup = []
-        entries = []
-
-        # Go through all previously flushed tables
-        for offset, table in self._table_offsets:
-            # Determine whether the stream_idx is inside this flushed table
-            index = table.indexes[index_idx]
-            if not (lookup_value & index):
-                # This table does not contain the index, so we continue to the next one
-                continue
-
-            fh.seek(offset + len(c_asdf.table_index), io.SEEK_SET)
-
-            count = table.size // len(c_asdf.table_entry)
-            for entry in c_asdf.table_entry[count](fh.read(table.size)):
-                # Determine whether this entry can be skipped
-                if idx != entry.idx:
-                    continue
-
-                tab_idx, offset, size = _table_fit(entry.offset, entry.size, entries, lookup)
-                if tab_idx is None:
-                    # The block can be skipped, continuing
-                    continue
-
-                entry.offset = offset
-                entry.size = size
-                entries.insert(tab_idx, entry)
-                lookup.insert(tab_idx, offset)
-
-        fh.seek(prev_offset, io.SEEK_SET)
-
-        # Fit all the entries inside the current table
-        for entry in self._table.get(idx, []):
-            tab_idx, offset, size = _table_fit(entry.offset, entry.size, entries, lookup)
-            if tab_idx is None:
-                continue
-
-            # Copy the entry, so we don't change the data that's currently inside the table
-            _entry = c_asdf.table_entry(
-                idx=idx,
-                flags=entry.flags,
-                offset=offset,
-                size=size,
-                file_size=entry.file_size,
-                file_offset=entry.file_offset,
-            )
-
-            entries.insert(tab_idx, _entry)
-            lookup.insert(tab_idx, offset)
-
-        return lookup
-
-    def values(self) -> ValuesView[c_asdf.table_entry]:
-        return self._table.values()
-
-    def keys(self) -> KeysView[int]:
-        return self._table.keys()
-
     def write(self, fh: BinaryIO) -> None:
         """Writes a table directly to the fileheader"""
         indexes = self.indexes()
         result = [entry.dumps() for entry in itertools.chain(*self._table.values())]
-
         index = c_asdf.table_index(
             prev_table=self.last_table_offset, size=len(result) * len(c_asdf.table_entry), indexes=indexes
         )
@@ -185,7 +98,6 @@ class Table:
 
         table_offset = fh.tell()
         self.last_table_offset = table_offset
-        self._table_offsets.append((table_offset, index))
 
         fh.writelines(result)
 
@@ -236,7 +148,7 @@ class AsdfWriter(io.RawIOBase):
             raise ValueError("Table size can't be 0 or smaller")
 
         self._max_entries = table_size
-        self._table = Table()
+        self._table = WriteTable()
 
         self._meta_buf = io.BytesIO()
         self._meta_tar = tarfile.open(fileobj=self._meta_buf, mode="w")  # noqa: SIM115
