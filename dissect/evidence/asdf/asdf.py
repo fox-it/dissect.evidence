@@ -88,7 +88,7 @@ class WriteTable:
         return [(indexes >> (x * 64)) & INDEX_MASK for x in range(4)]
 
     def write(self, fh: BinaryIO) -> None:
-        """Writes a table directly to the fileheader"""
+        """Writes a table directly to the fileheader."""
         indexes = self.indexes()
         result = [entry.dumps() for entry in itertools.chain(*self._table.values())]
         index = c_asdf.table_index(
@@ -407,7 +407,6 @@ class ReadTable:
         yield from self._available_stream_idx
 
     def get(self, index: int) -> tuple[list[c_asdf.table_entry], list[int]]:
-
         # Read entries when they are needed
         if self._table.get(index, None) is None:
             self.read_entries(index)
@@ -465,15 +464,14 @@ class ReadTable:
             self._insert(entry.idx, entry.offset, entry.size, entry.file_offset)
 
     def _read_entries(self) -> Iterator[c_asdf.table_entry]:
-        """Read all stream entries in order"""
-
+        """Read all stream entries in sequential order."""
         for offset, table in self._table_offsets:
             self._fh.seek(offset + len(c_asdf.table_index), io.SEEK_SET)
             count = table.size // len(c_asdf.table_entry)
             yield from c_asdf.table_entry[count](self._fh.read(table.size))
 
     def _read_stream_entries(self, stream_idx: int) -> Iterator[c_asdf.table_entry]:
-        """Only read stream entries belonging to ``stream_idx``"""
+        """Only read the stream entries belonging to ``stream_idx``."""
         # Which parts of table.indexes to look into for a stream
         index_idx = stream_idx // 64
         lookup_value = 1 << (stream_idx % 64)
