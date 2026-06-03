@@ -81,7 +81,7 @@ class EWF:
         self.close()
 
     def is_adcrypt(self) -> bool:
-        """Return whether the AD1 container is ADCRYPT encrypted."""
+        """Return whether the EWF container is ADCRYPT encrypted."""
         return self.adcrypt is not None
 
     def is_locked(self) -> bool:
@@ -198,8 +198,8 @@ class EWF:
                 end_of_chunk = table.descriptor.offset
 
             # The chunk data is stored within the table section
-            elif offset_of_chunk < table.descriptor.offset + table.descriptor.size:
-                end_of_chunk = table.descriptor.offset + table.descriptor.size
+            elif offset_of_chunk < table.descriptor.offset + table.descriptor.raw_size:
+                end_of_chunk = table.descriptor.offset + table.descriptor.raw_size
 
             else:
                 raise ValueError("Unknown size of last chunk")
@@ -229,7 +229,7 @@ class EWF:
     def close(self) -> None:
         """Close all segment file handles that we opened ourselves and clear the segment cache."""
         for idx, segment in self._segments.items():
-            if not hasattr(self.fh[idx], "read"):
+            if not isinstance(self.fh[idx], Path):
                 segment.fh.close()
 
         self._segments = {}
@@ -309,6 +309,11 @@ class SectionDescriptor:
         return self.descriptor.next
 
     @property
+    def raw_size(self) -> int:
+        """The raw size of the section, including the descriptor."""
+        return self.descriptor.size
+
+    @property
     def size(self) -> int:
         """The size of the section data."""
         return (self.descriptor.size - len(c_ewf.SectionDescriptor)) if self.descriptor.size else 0
@@ -350,7 +355,7 @@ class Section:
         if descriptor.type == "data":
             return DataSection(descriptor)
 
-        if descriptor.type in ("table"):
+        if descriptor.type == "table":
             return TableSection(descriptor)
 
         if descriptor.type == "table2":
