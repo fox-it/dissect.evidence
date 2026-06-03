@@ -121,7 +121,7 @@ _OBJECT_PARSERS = {
     f"{NS_XSD}integer": int,
     f"{NS_XSD}boolean": lambda v: v.lower() in ("true", "1"),
     f"{NS_XSD}hexBinary": bytes.fromhex,
-    f"{NS_XSD}dateTime": datetime.datetime.fromisoformat,
+    f"{NS_XSD}dateTime": lambda v: datetime.datetime.strptime(v, "%Y-%m-%dT%H:%M:%S.%f%z"),
 }
 
 

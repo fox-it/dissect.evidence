@@ -3,13 +3,19 @@ from __future__ import annotations
 import urllib.parse
 import zipfile
 from functools import cached_property
+from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO
 
-from dissect.evidence.aff4.metadata import DiskImage, FileImage, Information, Object, ValueType
+from dissect.evidence.aff4.metadata import Information
 from dissect.evidence.aff4.util import parse_turtle
 
 if TYPE_CHECKING:
     import pathlib
+    from types import TracebackType
+
+    from typing_extensions import Self
+
+    from dissect.evidence.aff4.metadata import DiskImage, FileImage, Object, ValueType
 
 MAX_OPEN_SEGMENTS = 128
 
@@ -42,6 +48,14 @@ class AFF4:
 
         self.information = Information(self, all_information)
 
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: TracebackType | None
+    ) -> None:
+        self.close()
+
     def segment(self, idx: int | str) -> Segment:
         """Open a segment by index or URI.
 
@@ -66,14 +80,14 @@ class AFF4:
             oldest_idx = self._segment_lru.pop(0)
             oldest_segment = self._segments.pop(oldest_idx)
 
-            # Don't close it if we received it as a file-like object
-            if hasattr(oldest_segment.fh, "rb") and not hasattr(self.fh[oldest_idx], "read"):
+            # Only close file handles that we opened ourselves
+            if isinstance(self.fh[oldest_idx], Path) and self.fh[oldest_idx].is_file():
                 oldest_segment.fh.close()
 
             del oldest_segment
 
         fh = self.fh[idx]
-        if not hasattr(fh, "read") and fh.is_file():
+        if isinstance(fh, Path) and fh.is_file():
             fh = fh.open("rb")
 
         segment = Segment(self, fh)
@@ -91,6 +105,15 @@ class AFF4:
         """List all file images in the AFF4 evidence."""
         return list(self.information.find("FileImage"))
 
+    def close(self) -> None:
+        """Close all segment file handles that we opened ourselves and clear the segment cache."""
+        for idx, segment in self._segments.items():
+            if isinstance(self.fh[idx], Path) and self.fh[idx].is_file():
+                segment.fh.close()
+
+        self._segments = {}
+        self._segment_lru = []
+
 
 class Segment:
     """AFF4 segment.
@@ -105,7 +128,7 @@ class Segment:
         self.fh = fh
         self._zip = None
 
-        if hasattr(self.fh, "read"):
+        if not isinstance(fh, Path):
             self._zip = zipfile.ZipFile(self.fh)
             self.path = zipfile.Path(self._zip)
         else:
