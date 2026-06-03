@@ -89,6 +89,13 @@ class EWF:
         return self.is_adcrypt() and self.adcrypt.is_locked()
 
     def segment(self, idx: int) -> Segment:
+        """Open a segment by index.
+
+        Implements a simple LRU cache to limit the number of open segments.
+
+        Args:
+            idx: Index of the segment to open.
+        """
         # Poor mans LRU
         if idx in self._segments:
             self._segment_lru.remove(idx)
