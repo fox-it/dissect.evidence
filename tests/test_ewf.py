@@ -11,7 +11,17 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+def _assert_pattern(fh: BinaryIO, size: int) -> None:
+    for i in range(size // 4096):
+        expected = bytes([i % 256] * 4096)
+        assert fh.read(4096) == expected, f"Mismatch at offset {i * 4096:#x}"
+
+    if size % 4096:
+        assert fh.read() == b"kusjes van SRT<3"
+
+
 def test_ewf(ewf_single: BinaryIO) -> None:
+    """Test reading from a single segment EWF image."""
     e = ewf.EWF(ewf_single)
 
     assert e.size == (4 * 1024 * 1024) + 16
@@ -22,22 +32,24 @@ def test_ewf(ewf_single: BinaryIO) -> None:
 
 
 def test_ewf_segmented(ewf_segmented: list[Path]) -> None:
+    """Test reading from a segmented EWF image."""
     e = ewf.EWF(ewf_segmented)
 
     assert e.size == (4 * 1024 * 1024) + 16
     _assert_pattern(e.open(), e.size)
 
 
-def _assert_pattern(fh: BinaryIO, size: int) -> None:
-    for i in range(size // 4096):
-        expected = bytes([i % 256] * 4096)
-        assert fh.read(4096) == expected, f"Mismatch at offset {i * 4096:#x}"
+def test_ewf_segmented_find_files(ewf_segmented: list[Path]) -> None:
+    """Test that providing a single segment file finds all segments in the same directory."""
+    e = ewf.EWF(ewf_segmented[0])
 
-    if size % 4096:
-        assert fh.read() == b"kusjes van SRT<3"
+    assert e.fh == ewf_segmented
+    assert e.size == (4 * 1024 * 1024) + 16
+    _assert_pattern(e.open(), e.size)
 
 
 def test_ewf_segment_lru(ewf_segmented: list[Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that the LRU cache for open segments works as expected."""
     monkeypatch.setattr(ewf, "MAX_OPEN_SEGMENTS", 2)
 
     e = ewf.EWF(ewf_segmented)
