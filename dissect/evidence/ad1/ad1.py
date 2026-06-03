@@ -14,6 +14,9 @@ from dissect.evidence.exception import FileNotFoundError, NotADirectoryError, No
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import PurePath
+    from types import TracebackType
+
+    from typing_extensions import Self
 
 EntryType = c_ad1.EntryType
 MetaType = c_ad1.MetaType
@@ -53,8 +56,9 @@ class AD1:
         - https://al3ks1s.fr/posts/adventures-part-1/
     """
 
-    def __init__(self, fh: BinaryIO | list[BinaryIO]):
-        fhs = [fh] if not isinstance(fh, list) else fh
+    def __init__(self, fh: BinaryIO | list[BinaryIO] | Path | list[Path]):
+        fhs = find_files(fh) if isinstance(fh, Path) else [fh] if not isinstance(fh, list) else fh
+
         self.fh = fhs
         self.root = VirtualEntry(self, "/")
 
@@ -77,6 +81,14 @@ class AD1:
         else:
             self._open_ad1()
 
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: TracebackType | None
+    ) -> None:
+        self.close()
+
     def is_adcrypt(self) -> bool:
         """Return whether the AD1 container is ADCRYPT encrypted."""
         return self.adcrypt is not None
@@ -91,7 +103,7 @@ class AD1:
         Implements a simple LRU cache to limit the number of open segments.
 
         Args:
-            idx: Index or URI of the segment to open.
+            idx: Index of the segment to open.
         """
         # Poor mans LRU
         if idx in self._segments:
@@ -103,21 +115,20 @@ class AD1:
             oldest_idx = self._segment_lru.pop(0)
             oldest_segment = self._segments.pop(oldest_idx)
 
-            # Don't close it if we received it as a file-like object
-            if not hasattr(self.fh[oldest_idx], "read"):
+            # Only close file handles that we opened ourselves
+            if isinstance(self.fh[oldest_idx], Path):
                 oldest_segment.fh.close()
 
             del oldest_segment
 
         fh = self.fh[idx]
-        if not hasattr(fh, "read"):
-            fh = fh.open("rb") if isinstance(fh, Path) else Path(fh).open("rb")  # noqa: SIM115
+        if isinstance(fh, Path):
+            fh = fh.open("rb")
 
         if self.is_adcrypt() and not self.is_locked():
             fh = self.adcrypt.wrap(fh, idx)
 
         segment = SegmentFile(fh)
-
         self._segments[idx] = segment
         self._segment_lru.append(idx)
 
@@ -209,6 +220,15 @@ class AD1:
     def open(self, path: str) -> FileStream:
         """Shortcut for ``AD1.entry(path).open()``."""
         return self.entry(path).open()
+
+    def close(self) -> None:
+        """Close all segment file handles that we opened ourselves and clear the segment cache."""
+        for idx, segment in self._segments.items():
+            if isinstance(self.fh[idx], Path):
+                segment.fh.close()
+
+        self._segments = {}
+        self._segment_lru = []
 
 
 def _hallicinate_root_entries(ad1: AD1) -> None:

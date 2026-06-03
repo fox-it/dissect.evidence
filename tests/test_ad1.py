@@ -165,6 +165,58 @@ def test_ad1_segmented(ad1_segmented: list[Path]) -> None:
     assert hashlib.sha1(buf).hexdigest() == "9c3dcb1f9185a314ea25d51aed3b5881b32f420c"
 
 
+def test_ad1_segmented_find_files(ad1_segmented: list[Path]) -> None:
+    """Test that providing a single segment file finds all segments in the same directory."""
+    fs = ad1.AD1(ad1_segmented[0])
+
+    assert fs.fh == ad1_segmented
+
+
+def test_ad1_close_with_fh(ad1_basic: BinaryIO) -> None:
+    """Verify that AD1 does not close file-like objects passed to it."""
+    fs = ad1.AD1(ad1_basic)
+    assert len(fs._segments) == 1
+    assert fs._segment_lru == [0]
+
+    fs.close()
+    assert fs._segments == {}
+    assert fs._segment_lru == []
+
+    # The file-like object passed to AD1 should not be closed by AD1
+    assert not ad1_basic.closed
+
+
+def test_ad1_close_with_paths(ad1_segmented: list[Path]) -> None:
+    """Verify that AD1 closes file handles opened from paths."""
+    fs = ad1.AD1(ad1_segmented)
+
+    num_segments = len(fs._segments)
+    assert num_segments > 0
+
+    # Store references to all file handles
+    fhs = [fs._segments[idx].fh for idx in range(num_segments)]
+
+    fs.close()
+
+    # Verify all file handles are closed
+    for fh in fhs:
+        assert fh.closed
+    assert fs._segments == {}
+    assert fs._segment_lru == []
+
+
+def test_ad1_context_manager_with_fh(ad1_basic: BinaryIO) -> None:
+    """Verify context manager closes AD1 but not the file-like object passed to it."""
+    with ad1.AD1(ad1_basic) as fs:
+        assert isinstance(fs, ad1.AD1)
+
+    assert fs._segments == {}
+    assert fs._segment_lru == []
+
+    # The file-like object should not be closed by AD1's context manager
+    assert not ad1_basic.closed
+
+
 def test_adcrypt_passphrase(ad1_encrypted_passphrase: list[Path]) -> None:
     """Test if we can decrypt ADCRYPT AD1 images, in this example a segmented AD1 logical image."""
     fs = ad1.AD1(ad1_encrypted_passphrase)
