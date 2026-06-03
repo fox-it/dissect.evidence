@@ -50,6 +50,51 @@ def test_ewf_segment_lru(ewf_segmented: list[Path], monkeypatch: pytest.MonkeyPa
     assert e._segment_lru == [0, 1]
 
 
+def test_ewf_close_with_fh(ewf_single: BinaryIO) -> None:
+    """Verify that EWF does not close file-like objects passed to it."""
+    e = ewf.EWF(ewf_single)
+    assert len(e._segments) == 1
+    assert e._segment_lru == [0]
+
+    e.close()
+    assert e._segments == {}
+    assert e._segment_lru == []
+
+    # The file-like object passed to EWF should not be closed by EWF
+    assert not ewf_single.closed
+
+
+def test_ewf_close_with_paths(ewf_segmented: list[Path]) -> None:
+    """Verify that EWF closes file handles opened from paths."""
+    e = ewf.EWF(ewf_segmented)
+
+    num_segments = len(e._segments)
+    assert num_segments > 0
+
+    # Store references to all file handles
+    fhs = [e._segments[idx].fh for idx in range(num_segments)]
+
+    e.close()
+
+    # Verify all file handles are closed
+    for fh in fhs:
+        assert fh.closed
+    assert e._segments == {}
+    assert e._segment_lru == []
+
+
+def test_ewf_context_manager_with_fh(ewf_single: BinaryIO) -> None:
+    """Verify context manager closes EWF but not the file-like object passed to it."""
+    with ewf.EWF(ewf_single) as e:
+        assert isinstance(e, ewf.EWF)
+
+    assert e._segments == {}
+    assert e._segment_lru == []
+
+    # The file-like object should not be closed by EWF's context manager
+    assert not ewf_single.closed
+
+
 def test_adcrypt_passphrase(ewf_encrypted_passphrase: BinaryIO) -> None:
     """Test if we can decrypt ADCRYPT EWF images, in this example a single segment EWF image."""
     e = ewf.EWF(ewf_encrypted_passphrase)

@@ -236,7 +236,7 @@ class EWF:
     def close(self) -> None:
         """Close all segment file handles that we opened ourselves and clear the segment cache."""
         for idx, segment in self._segments.items():
-            if not isinstance(self.fh[idx], Path):
+            if isinstance(self.fh[idx], Path):
                 segment.fh.close()
 
         self._segments = {}
