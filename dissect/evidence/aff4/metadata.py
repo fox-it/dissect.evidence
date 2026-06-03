@@ -88,9 +88,14 @@ class Object:
     @classmethod
     def from_values(cls, ctx: Information, id: str, values: dict[str, str]) -> Object:
         """Create an object from its values, instantiating the appropriate subclass based on its type."""
-        if (type := values.get(f"{NS_RDF}type")) and (
-            subcls := cls.__types__.get(type if isinstance(type, str) else type[0])
-        ):
+        if type := values.get(f"{NS_RDF}type"):
+            if isinstance(type, str):
+                type = [type]
+
+            subcls = cls
+            for t in type:
+                if t in cls.__types__ and len(cls.__types__[t].__mro__) > len(subcls.__mro__):
+                    subcls = cls.__types__[t]
             return subcls(ctx, id, values)
         return cls(ctx, id, values)
 
