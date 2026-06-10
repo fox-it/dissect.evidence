@@ -3,8 +3,6 @@ from __future__ import annotations
 from dissect.evidence.ewf.c_ewf import c_ewf
 from dissect.evidence.ewf.ewf import (
     EWF,
-    EWFError,
-    EWFStream,
     HeaderSection,
     SectionDescriptor,
     Segment,
@@ -12,10 +10,10 @@ from dissect.evidence.ewf.ewf import (
     VolumeSection,
     find_files,
 )
+from dissect.evidence.ewf.stream import EWFStream
 
 __all__ = [
     "EWF",
-    "EWFError",
     "EWFStream",
     "HeaderSection",
     "SectionDescriptor",

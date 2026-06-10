@@ -76,8 +76,29 @@ def ad1_encrypted_certificate() -> list[Path]:
 
 
 @pytest.fixture
-def ewf_data() -> Iterator[BinaryIO]:
-    yield from open_data("_data/ewf/ewf.E01")
+def ewf_single() -> Iterator[BinaryIO]:
+    yield from open_data("_data/ewf/single/image.E01")
+
+
+@pytest.fixture
+def ewf_segmented() -> list[Path]:
+    return [
+        absolute_path("_data/ewf/segmented/image.E01"),
+        absolute_path("_data/ewf/segmented/image.E02"),
+        absolute_path("_data/ewf/segmented/image.E03"),
+        absolute_path("_data/ewf/segmented/image.E04"),
+        absolute_path("_data/ewf/segmented/image.E05"),
+    ]
+
+
+@pytest.fixture
+def ewf_encrypted_passphrase() -> Iterator[BinaryIO]:
+    yield from open_data("_data/ewf/encrypted-passphrase/encrypted.E01")
+
+
+@pytest.fixture
+def ewf_encrypted_certificate() -> Iterator[BinaryIO]:
+    yield from open_data("_data/ewf/encrypted-certificate/encrypted.E01")
 
 
 @pytest.fixture

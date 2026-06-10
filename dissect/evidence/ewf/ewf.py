@@ -1,21 +1,20 @@
 from __future__ import annotations
 
-import logging
-import os
+import codecs
 import zlib
 from bisect import bisect_right
-from functools import lru_cache
+from functools import cached_property, lru_cache
 from pathlib import Path
-from typing import BinaryIO
+from typing import TYPE_CHECKING, BinaryIO
 
-from dissect.util.stream import AlignedStream
-
+from dissect.evidence.adcrypt.adcrypt import ADCrypt, is_adcrypt
 from dissect.evidence.ewf import c_ewf
-from dissect.evidence.exception import EWFError
+from dissect.evidence.ewf.stream import EWFStream
 
-log = logging.getLogger(__name__)
-log.setLevel(os.getenv("DISSECT_LOG_EWF", "CRITICAL"))
+if TYPE_CHECKING:
+    from types import TracebackType
 
+    from typing_extensions import Self
 
 MAX_OPEN_SEGMENTS = 128
 
@@ -29,7 +28,7 @@ def find_files(path: str | Path) -> list[Path]:
     ext = path.suffix
 
     if ext[1].upper() not in "ELS":
-        raise EWFError(f"Invalid EWF file: {path}")
+        raise ValueError(f"Invalid EWF file: {path}")
 
     ewfglob = f"[{ext[1]}-{'Z' if ext[1].isupper() else 'z'}]" if len(ext) == 4 else f"{ext[1]}[x-z]"
 
@@ -37,52 +36,66 @@ def find_files(path: str | Path) -> list[Path]:
 
 
 class EWF:
-    """Expert Witness Disk Image Format."""
+    """Expert Witness Disk Image Format.
+
+    Args:
+        fh: A file handle, list of file handles, path or list of paths to the EWF segment files.
+            If a path is provided, all related segment files will be automatically discovered.
+    """
 
     def __init__(self, fh: BinaryIO | list[BinaryIO] | Path | list[Path]):
-        fhs = [fh] if not isinstance(fh, list) else fh
+        fhs = find_files(fh) if isinstance(fh, Path) else [fh] if not isinstance(fh, list) else fh
 
         self.fh = fhs
-        self.header: HeaderSection = None
-        self.volume: VolumeSection = None
-        self._segments: dict[str, Segment] = {}
-        self._segment_offsets = []
-        self._segment_lru = []
+        self.header: HeaderSection | None = None
+        self.volume: VolumeSection | None = None
 
-        segment_offset = 0
+        self.chunk_size = 0
+        self.size = 0
 
-        for i in range(len(fhs)):
-            try:
-                segment = self.segment(i)
-            except Exception:
-                log.exception("Failed to parse as EWF file: %s", fh)
-                continue
+        self._segments: dict[int, Segment] = {}
+        self._segment_lru: list[int] = []
 
-            if segment.header and not self.header:
-                self.header = segment.header
+        self._chunk_lookup: list[int] = []
+        self._chunk_map: list[tuple[int, int]] = []
 
-            if segment.volume and not self.volume:
-                self.volume = segment.volume
+        if not self.fh:
+            raise ValueError("No segment files provided for EWF container")
 
-            if segment_offset != 0:
-                self._segment_offsets.append(segment_offset)
+        self.adcrypt = None
 
-            segment.offset = segment_offset * self.volume.sector_size
-            segment.sector_offset = segment_offset
-            segment_offset += segment.sector_count
+        first_segment = self.segment(0)
+        if is_adcrypt(first_segment.fh):
+            self.adcrypt = ADCrypt(first_segment.fh)
+        else:
+            self._open_ewf()
 
-        if not self.header or not self.volume:
-            raise EWFError(f"Failed to load EWF: {fh}")
+        self.read_chunk = lru_cache(128)(self.read_chunk)
 
-        self.chunk_size = self.volume.sector_count * self.volume.sector_size
+    def __enter__(self) -> Self:
+        return self
 
-        max_size = self.volume.chunk_count * self.volume.sector_count * self.volume.sector_size
-        last_table = self.segment(len(self.fh) - 1).tables[-1]
-        last_chunk_size = len(last_table.read_chunk(last_table.num_entries - 1))
+    def __exit__(
+        self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: TracebackType | None
+    ) -> None:
+        self.close()
 
-        self.size = max_size - (self.chunk_size - last_chunk_size)
+    def is_adcrypt(self) -> bool:
+        """Return whether the EWF container is ADCRYPT encrypted."""
+        return self.adcrypt is not None
+
+    def is_locked(self) -> bool:
+        """Return whether the ADCRYPT container is locked."""
+        return self.is_adcrypt() and self.adcrypt.is_locked()
 
     def segment(self, idx: int) -> Segment:
+        """Open a segment by index.
+
+        Implements a simple LRU cache to limit the number of open segments.
+
+        Args:
+            idx: Index of the segment to open.
+        """
         # Poor mans LRU
         if idx in self._segments:
             self._segment_lru.remove(idx)
@@ -93,274 +106,375 @@ class EWF:
             oldest_idx = self._segment_lru.pop(0)
             oldest_segment = self._segments.pop(oldest_idx)
 
-            # Don't close it if we received it as a file-like object
-            if not hasattr(self.fh[oldest_idx], "read"):
+            # Only close file handles that we opened ourselves
+            if isinstance(self.fh[oldest_idx], Path):
                 oldest_segment.fh.close()
 
             del oldest_segment
 
         fh = self.fh[idx]
-        if not hasattr(fh, "read"):
-            fh = fh.open("rb") if isinstance(fh, Path) else Path(fh).open("rb")  # noqa: SIM115
+        if isinstance(fh, Path):
+            fh = fh.open("rb")
 
-        segment = Segment(self, fh)
-        if self.volume and 0 < idx <= len(self._segment_offsets):
-            # We already have a known segment offset for this segment, so set it back
-            segment_offset = self._segment_offsets[idx - 1]
-            segment.offset = segment_offset * self.volume.sector_size
-            segment.sector_offset = segment_offset
-        else:
-            # Otherwise we're in the initialization loop (or we're idx == 0)
-            segment.offset = 0
-            segment.sector_offset = 0
+        if self.is_adcrypt() and not self.is_locked():
+            fh = self.adcrypt.wrap(fh, idx)
 
+        segment = Segment(fh)
         self._segments[idx] = segment
         self._segment_lru.append(idx)
 
         return segment
 
-    def open(self) -> BinaryIO:
-        return EWFStream(self)
+    def unlock(self, *, passphrase: str | bytes | None = None, private_key: Path | bytes | None = None) -> None:
+        """Unlock the ADCRYPT container with a given passphrase or private key.
 
+        Args:
+            passphrase: The passphrase to unlock the container.
+            private_key: The private key to unlock the container.
 
-class EWFStream(AlignedStream):
-    def __init__(self, ewf: EWF):
-        self.ewf = ewf
-        self.sector_size = self.ewf.volume.sector_size
-        super().__init__(ewf.size)
+        Raises:
+            RuntimeError: If required dependencies are missing.
+            ValueError: If unlocking failed.
+        """
+        self.adcrypt.unlock(passphrase=passphrase, private_key=private_key)
 
-    def _read(self, offset: int, length: int) -> bytes:
-        result = []
+        # Reset LRU
+        self._segments = {}
+        self._segment_lru = []
 
-        sector_offset = offset // self.sector_size
-        sector_count = (length + self.sector_size - 1) // self.sector_size
+        # Open the EWF
+        self._open_ewf()
 
-        segment_idx = bisect_right(self.ewf._segment_offsets, sector_offset)
+    def _open_ewf(self) -> None:
+        """Open the EWF container and initialize the volume and chunk information."""
+        self.volume = None
 
-        while sector_count > 0:
-            if segment_idx > len(self.ewf._segment_offsets):
-                raise EWFError(f"Missing EWF file for segment index: {segment_idx}")
+        chunk = 0
+        for i in range(len(self.fh)):
+            segment = self.segment(i)
+            if segment.header.signature not in (b"EVF\x09\x0d\x0a\xff\x00", b"LVF\x09\x0d\x0a\xff\x00"):
+                raise ValueError(f"Invalid EWF signature in segment {i}, got {segment.header.signature!r}")
 
-            segment = self.ewf.segment(segment_idx)
+            if segment.number != i + 1:
+                raise ValueError(f"Invalid EWF segment number in segment {i}, got {segment.number}, expected {i + 1}")
 
-            segment_remaining_sectors = segment.sector_count - (sector_offset - segment.sector_offset)
-            segment_sectors = min(segment_remaining_sectors, sector_count)
+            if not self.volume and segment.volume:
+                self.volume = segment.volume
+                self.chunk_size = self.volume.sectors_per_chunk * self.volume.sector_size
+            elif not self.volume and not segment.volume:
+                raise ValueError("Missing expected volume section in first segment")
 
-            result.append(segment.read_sectors(sector_offset, segment_sectors))
-            sector_offset += segment_sectors
-            sector_count -= segment_sectors
+            for j, table in enumerate(segment.tables):
+                chunk += table.number_of_entries
+                self._chunk_lookup.append(chunk)
+                self._chunk_map.append((i, j))
 
-            segment_idx += 1
+        max_size = self.volume.number_of_chunks * self.chunk_size
+        last_chunk = self.read_chunk(self.volume.number_of_chunks - 1)
 
-        return b"".join(result)
-
-
-class Segment:
-    def __init__(self, ewf: EWF, fh: BinaryIO):
-        self.ewf = ewf
-        self.fh = fh
-
-        fh.seek(0)
-        self.ewfheader = c_ewf.EWFHeader(fh)
-        self.header = ewf.header
-        self.volume = ewf.volume
-
-        if self.ewfheader.signature not in (b"EVF\x09\x0d\x0a\xff\x00", b"LVF\x09\x0d\x0a\xff\x00"):
-            raise EWFError(f"Invalid signature, got {self.ewfheader.signature!r}")
-
-        self.sections: list[SectionDescriptor] = []
-        self.tables: list[TableSection] = []
-        self.table_offsets = []
-
-        offset = 0
-        sector_offset = 0
-
-        while True:
-            section = SectionDescriptor(fh)
-            self.sections.append(section)
-
-            if section.type in (b"header", b"header2") and not self.header:
-                self.header = HeaderSection(self, section)
-
-            if section.type in (b"disk", b"volume") and not self.volume:
-                self.volume = VolumeSection(self, section)
-
-            if section.type == b"table":
-                table = TableSection(self, section)
-
-                if sector_offset != 0:
-                    self.table_offsets.append(sector_offset)
-
-                table.offset = sector_offset * self.volume.sector_size
-                table.sector_offset = sector_offset
-                sector_offset += table.sector_count
-
-                self.tables.append(table)
-
-            if section.next == offset or section.type == b"done":
-                break
-
-            offset = section.next
-            fh.seek(offset)
-
-        self.chunk_count = sum([t.num_entries for t in self.tables])
-        self.sector_count = self.chunk_count * self.volume.sector_count
-        self.size = self.chunk_count * self.volume.sector_count * self.volume.sector_size
-        self.sector_offset = None  # Set later
-        self.offset = None  # Set later
-
-    def read_sectors(self, sector: int, count: int) -> bytes:
-        log.debug("Segment::read_sectors(0x%x, 0x%x)", sector, count)
-        segment_sector = sector - self.sector_offset
-        r = []
-
-        table_idx = bisect_right(self.table_offsets, segment_sector)
-        while count > 0:
-            table = self.tables[table_idx]
-
-            table_remaining_sectors = table.sector_count - (segment_sector - table.sector_offset)
-            table_sectors = min(table_remaining_sectors, count)
-
-            r.append(table.read_sectors(segment_sector, table_sectors))
-            segment_sector += table_sectors
-            count -= table_sectors
-
-            table_idx += 1
-
-        return b"".join(r)
-
-
-class HeaderSection:
-    def __init__(self, segment: Segment, section: SectionDescriptor):
-        self.segment = segment
-        self.section = section
-
-        fh = segment.fh
-        fh.seek(section.data_offset)
-        self.data = zlib.decompress(fh.read(section.size))
-
-        if self.data[0] in (b"\xff", b"\xfe"):
-            self.data = self.data.decode("utf16")
-
-    def __repr__(self) -> str:
-        return f"<HeaderSection categories={int(self.data[0])}>"
-
-
-class VolumeSection:
-    def __init__(self, segment: Segment, section: SectionDescriptor):
-        self.segment = segment
-        self.section = section
-
-        fh = segment.fh
-        fh.seek(section.data_offset)
-        data = c_ewf.EWFVolumeSection(fh) if section.size == 1052 else c_ewf.EWFVolumeSectionSpec(fh)
-
-        self.volume = data
-        self.chunk_count = data.chunk_count
-        self.sector_count = data.sector_count
-        self.sector_size = data.sector_size
-
-
-class TableSection:
-    def __init__(self, segment: Segment, section: SectionDescriptor):
-        self.segment = segment
-        self.section = section
-
-        fh = segment.fh
-        fh.seek(section.data_offset)
-
-        self.header = c_ewf.EWFTableSection(fh)
-        self.num_entries = self.header.num_entries
-        self.base_offset = self.header.base_offset
-        self.entries = self.header.entries
-
-        self.sector_count = self.num_entries * self.segment.volume.sector_count
-        self.size = self.sector_count * self.segment.volume.sector_size
-        self.sector_offset = None  # Set later
-        self.offset = None  # Set later
-
-        self.read_chunk = lru_cache(1024)(self.read_chunk)
+        self.size = max_size - (self.chunk_size - len(last_chunk))
 
     def read_chunk(self, chunk: int) -> bytes:
-        log.debug("TableSection::read_chunk(0x%x)", chunk)
+        """Read a chunk of data from the EWF container.
 
-        chunk_entry = self.entries[chunk]
-        chunk_offset = self.base_offset + (chunk_entry & 0x7FFFFFFF)
-        compressed = chunk_entry >> 31 == 1
+        Args:
+            chunk: The chunk index to read.
+        """
+        lookup_idx = bisect_right(self._chunk_lookup, chunk)
+        if lookup_idx >= len(self._chunk_map):
+            raise IndexError(f"Chunk {chunk} out of range")
 
-        # EWF sucks
+        segment_idx, table_idx = self._chunk_map[lookup_idx]
+
+        segment = self.segment(segment_idx)
+        table = segment.tables[table_idx]
+
+        chunk_offset = 0 if lookup_idx == 0 else self._chunk_lookup[lookup_idx - 1]
+        relative_chunk = chunk - chunk_offset
+
+        entry = table.entries[relative_chunk]
+        offset_of_chunk = table.base_offset + (entry & 0x7FFFFFFF)
+        compressed = entry >> 31 == 1
+
         # We don't know the chunk size, so try to determine it using the offset of the next chunk
-        # When it's the last chunk in the table though, this becomes trickier.
+        # When it's the last chunk in the table though, this becomes trickier
         # We have to check if the chunk data is preceding the table, or if it's contained within the table section
-        # Then we can calculate the chunk size using these offsets
-        if chunk + 1 == self.num_entries:
-            # The chunk data is stored before the table section
-            if chunk_offset < self.section.offset:
-                chunk_size = self.section.offset - chunk_offset
+        if relative_chunk == table.number_of_entries - 1:
+            # The chunk data is stored before the table section (probably in a sectors section)
+            if offset_of_chunk < table.descriptor.offset:
+                end_of_chunk = table.descriptor.offset
+
             # The chunk data is stored within the table section
-            elif chunk_offset < self.section.offset + self.section.size:
-                chunk_size = self.section.offset + self.section.size - chunk_offset
+            elif offset_of_chunk < table.descriptor.offset + table.descriptor.raw_size:
+                end_of_chunk = table.descriptor.offset + table.descriptor.raw_size
+
             else:
-                raise EWFError("Unknown size of last chunk")
+                raise ValueError("Unknown size of last chunk")
         else:
-            chunk_size = self.base_offset + (self.entries[chunk + 1] & 0x7FFFFFFF) - chunk_offset
+            end_of_chunk = table.base_offset + (table.entries[relative_chunk + 1] & 0x7FFFFFFF)
 
-        # Non compressed chunks have a 4 byte checksum
+        size_of_chunk = end_of_chunk - offset_of_chunk
+
+        # Uncompressed chunks have a 4 byte checksum at the end
         if not compressed:
-            chunk_size -= 4
+            size_of_chunk -= 4
 
-        self.segment.fh.seek(chunk_offset)
-        buf = self.segment.fh.read(chunk_size)
-
+        segment.fh.seek(offset_of_chunk)
+        buf = segment.fh.read(size_of_chunk)
         if compressed:
             buf = zlib.decompress(buf)
 
         return buf
 
-    def read_sectors(self, sector: int, count: int) -> bytes:
-        log.debug("TableSection::read_sectors(0x%x, 0x%x)", sector, count)
+    def open(self) -> BinaryIO:
+        """Open a stream to read the EWF container contents."""
+        if self.is_locked():
+            raise ValueError("EWF container is locked by ADCRYPT")
+
+        return EWFStream(self)
+
+    def close(self) -> None:
+        """Close all segment file handles that we opened ourselves and clear the segment cache."""
+        for idx, segment in self._segments.items():
+            if isinstance(self.fh[idx], Path):
+                segment.fh.close()
+
+        self._segments = {}
+        self._segment_lru = []
+
+
+class Segment:
+    """EWF segment."""
+
+    def __init__(self, fh: BinaryIO):
+        self.fh = fh
+
+        self.fh.seek(0)
+        self.header = c_ewf.SegmentHeader(fh)
+        self.number = self.header.segment_number
+
+    @cached_property
+    def sections(self) -> list[Section]:
+        """Return all sections in this segment."""
         result = []
 
-        chunk_sector_count = self.segment.volume.sector_count
-        sector_size = self.segment.volume.sector_size
+        offset = len(c_ewf.SegmentHeader)
+        while True:
+            self.fh.seek(offset)
+            section = Section.from_fh(self.fh)
+            result.append(section)
 
-        table_sector = sector - self.sector_offset
-        table_chunk = table_sector // chunk_sector_count
+            if section.descriptor.next == offset or section.descriptor.type == b"done":
+                break
 
-        while count > 0:
-            table_sector_offset = table_sector % chunk_sector_count
-            chunk_remaining_sectors = chunk_sector_count - table_sector_offset
-            table_sectors = min(chunk_remaining_sectors, count)
+            offset = section.descriptor.next
 
-            chunk_pos = table_sector_offset * sector_size
-            chunk_end = chunk_pos + (table_sectors * sector_size)
+        return result
 
-            buf = self.read_chunk(table_chunk)
-            if chunk_pos != 0 or table_sectors != chunk_sector_count:
-                buf = buf[chunk_pos:chunk_end]
-            result.append(buf)
+    @cached_property
+    def headers(self) -> list[HeaderSection]:
+        """Return all header sections in this segment."""
+        return [section for section in self.sections if isinstance(section, HeaderSection)]
 
-            count -= table_sectors
-            table_sector += table_sectors
-            table_chunk += 1
+    @cached_property
+    def tables(self) -> list[TableSection]:
+        """Return all table sections in this segment."""
+        return [section for section in self.sections if type(section) is TableSection]  # Ignore Table2Section
 
-        return b"".join(result)
+    @cached_property
+    def volume(self) -> VolumeSection | None:
+        """Return the volume section in this segment, if present."""
+        for section in self.sections:
+            if isinstance(section, VolumeSection):
+                return section
+        return None
 
 
 class SectionDescriptor:
+    """EWF section descriptor."""
+
     def __init__(self, fh: BinaryIO):
         self.fh = fh
 
         self.offset = fh.tell()
-        descriptor = c_ewf.EWFSectionDescriptor(fh)
-        self.type = descriptor.type.rstrip(b"\x00")
-        self.next = descriptor.next
-        self.size = descriptor.size - len(c_ewf.EWFSectionDescriptor)
-        self.checksum = descriptor.checksum
-        self.data_offset = fh.tell()
+        self.descriptor = c_ewf.SectionDescriptor(fh)
 
     def __repr__(self) -> str:
         return (
             f"<SectionDescriptor "
-            f"type={self.type} size={self.size:#x} offset={self.offset:#x} checksum={self.checksum:#x}>"
+            f"type={self.type!r} size={self.size:#x} offset={self.offset:#x} checksum={self.checksum:#x}>"
         )
+
+    @property
+    def type(self) -> str:
+        """The type of the section."""
+        return self.descriptor.type.rstrip(b"\x00").decode()
+
+    @property
+    def next(self) -> int:
+        """The offset of the next section."""
+        return self.descriptor.next
+
+    @property
+    def raw_size(self) -> int:
+        """The raw size of the section, including the descriptor."""
+        return self.descriptor.size
+
+    @property
+    def size(self) -> int:
+        """The size of the section data."""
+        return (self.descriptor.size - len(c_ewf.SectionDescriptor)) if self.descriptor.size else 0
+
+    @property
+    def data(self) -> bytes:
+        """The raw data of the section."""
+        self.fh.seek(self.offset + len(c_ewf.SectionDescriptor))
+        return self.fh.read(self.size)
+
+    @property
+    def checksum(self) -> int:
+        """The checksum of the section data."""
+        return self.descriptor.checksum
+
+
+class Section:
+    """EWF section."""
+
+    def __init__(self, descriptor: SectionDescriptor):
+        self.descriptor = descriptor
+
+    def __repr__(self) -> str:
+        return f"<{self.__class__.__name__} type={self.descriptor.type!r} size={self.descriptor.size:#x}>"
+
+    @classmethod
+    def from_fh(
+        cls, fh: BinaryIO
+    ) -> Section | HeaderSection | VolumeSection | DataSection | TableSection | Table2Section | HashSection:
+        """Open a section from a file-like object."""
+        descriptor = SectionDescriptor(fh)
+
+        if descriptor.type in ("header", "header2"):
+            return HeaderSection(descriptor)
+
+        if descriptor.type in ("disk", "volume"):
+            return VolumeSection(descriptor)
+
+        if descriptor.type == "data":
+            return DataSection(descriptor)
+
+        if descriptor.type == "table":
+            return TableSection(descriptor)
+
+        if descriptor.type == "table2":
+            return Table2Section(descriptor)
+
+        if descriptor.type == "hash":
+            return HashSection(descriptor)
+
+        return Section(descriptor)
+
+    @property
+    def type(self) -> str:
+        """The type of the section."""
+        return self.descriptor.type
+
+    @cached_property
+    def data(self) -> bytes:
+        """The raw data of the section."""
+        return self.descriptor.data
+
+
+class HeaderSection(Section):
+    """EWF header section."""
+
+    @cached_property
+    def data(self) -> str:
+        """The header data."""
+        data = zlib.decompress(self.descriptor.data)
+        return data.decode("utf16") if data[:2] in (codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE) else data.decode()
+
+
+class VolumeSection(Section):
+    """EWF volume section."""
+
+    @cached_property
+    def data(self) -> c_ewf.VolumeSection | c_ewf.VolumeSectionSmart:
+        """The volume data."""
+        return (c_ewf.VolumeSection if self.descriptor.size == len(c_ewf.VolumeSection) else c_ewf.VolumeSectionSmart)(
+            self.descriptor.data
+        )
+
+    @property
+    def number_of_chunks(self) -> int:
+        """The number of chunks in the volume."""
+        return self.data.number_of_chunks
+
+    @property
+    def sectors_per_chunk(self) -> int:
+        """The number of sectors per chunk."""
+        return self.data.sectors_per_chunk
+
+    @property
+    def sector_size(self) -> int:
+        """The size of a sector in bytes."""
+        return self.data.bytes_per_sector
+
+
+class DataSection(Section):
+    """EWF data section."""
+
+    @cached_property
+    def data(self) -> c_ewf.DataSection:
+        """The data section."""
+        return c_ewf.DataSection(self.descriptor.data)
+
+
+class TableSection(Section):
+    """EWF table section."""
+
+    def __repr__(self) -> str:
+        return (
+            f"<{self.__class__.__name__} "
+            f"type={self.descriptor.type!r} size={self.descriptor.size:#x} "
+            f"number_of_entries={self.number_of_entries} base_offset={self.base_offset:#x}>"
+        )
+
+    @cached_property
+    def data(self) -> c_ewf.TableSection:
+        """The table section."""
+        self.descriptor.fh.seek(self.descriptor.offset + len(c_ewf.SectionDescriptor))
+        return c_ewf.TableSection(self.descriptor.fh)
+
+    @cached_property
+    def entries(self) -> list[int]:
+        """The table entries."""
+        self.descriptor.fh.seek(self.descriptor.offset + len(c_ewf.SectionDescriptor) + len(c_ewf.TableSection))
+        return c_ewf.uint32[self.number_of_entries](self.descriptor.fh)
+
+    @property
+    def number_of_entries(self) -> int:
+        """The number of entries in the table."""
+        return self.data.number_of_entries
+
+    @property
+    def base_offset(self) -> int:
+        """The base offset of the table."""
+        return self.data.base_offset
+
+
+class Table2Section(TableSection):
+    """EWF table2 section."""
+
+
+class HashSection(Section):
+    """EWF hash section."""
+
+    @cached_property
+    def data(self) -> c_ewf.HashSection:
+        """The hash section."""
+        return c_ewf.HashSection(self.descriptor.data)
+
+    @property
+    def md5(self) -> str:
+        """The MD5 hash of the section."""
+        return self.data.md5.hex()
