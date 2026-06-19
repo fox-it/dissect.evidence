@@ -150,8 +150,8 @@ class Map(Object):
 
     @property
     def map_gap_default_stream(self) -> str:
-        """Return the default gap stream type."""
-        return self["mapGapDefaultStream"]
+        """Return the default gap stream type, defaulting to the ``Zero`` symbolic stream."""
+        return self.get("mapGapDefaultStream") or f"{NS_AFF4}Zero"
 
     @property
     def dependent_stream(self) -> ImageStream | list[ImageStream]:
@@ -241,7 +241,7 @@ class Image(Object):
     __type__ = f"{NS_AFF4}Image"
 
     def __repr__(self) -> str:
-        return f"<{self.__class__.__name__} {self.id} hash={self.hash}>"
+        return f"<{self.__class__.__name__} {self.id} hash={self.get('hash')}>"
 
     @property
     def hash(self) -> str | list[str]:
@@ -272,6 +272,16 @@ class ContiguousImage(Image):
     def open(self) -> BufferedStream:
         """Open the image for reading."""
         return BufferedStream(self.data_stream.open(), size=self.size)
+
+
+class DiscontiguousImage(ContiguousImage):
+    """AFF4 DiscontiguousImage object.
+
+    A sparse image whose ``dataStream`` is typically a :class:`Map`, mapping populated regions to
+    underlying streams and filling the gaps with the map's default gap stream.
+    """
+
+    __type__ = f"{NS_AFF4}DiscontiguousImage"
 
 
 class DiskImage(ContiguousImage):

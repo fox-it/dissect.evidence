@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime
+import re
+import urllib.parse
 from enum import Enum
 from typing import TYPE_CHECKING, TextIO
 
@@ -29,6 +31,7 @@ def parse_turtle(fh: TextIO) -> dict[str, str]:
     """
     objects = {}
     prefixes = {}
+    base = None
 
     parts = []
     for line in fh:
@@ -45,27 +48,30 @@ def parse_turtle(fh: TextIO) -> dict[str, str]:
             if full_statement.startswith("@prefix"):
                 _, prefix, uri = full_statement.split(maxsplit=2)
                 prefixes[prefix] = uri.rstrip(".").strip()[1:-1]
+            elif full_statement.startswith("@base"):
+                _, uri = full_statement.split(maxsplit=1)
+                base = uri.rstrip(".").strip()[1:-1]
             else:
                 subject = None
-                for i, statement in enumerate(_iter_statements(full_statement, ";")):
+                for statement in _iter_statements(full_statement, ";"):
                     if subject is None:
                         subject, predicate, object = statement.split(maxsplit=2)
                         subject = _explode_prefix(subject.strip(), prefixes)
 
                         if subject.startswith("<") and subject.endswith(">"):
-                            subject = subject[1:-1]
+                            subject = _resolve_iri(subject[1:-1], base)
                     else:
                         predicate, object = statement.split(maxsplit=1)
 
                     predicate = predicate.strip()
                     object = object.strip()
 
-                    if i == 0 and predicate == "a":
+                    if predicate == "a":
                         predicate = f"{NS_RDF}type"
 
                     predicate = _explode_prefix(predicate, prefixes)
 
-                    if len(object := [_parse_object(obj, prefixes) for obj in _iter_statements(object, ",")]) == 1:
+                    if len(object := [_parse_object(obj, prefixes, base) for obj in _iter_statements(object, ",")]) == 1:
                         object = object[0]
 
                     if subject not in objects:
@@ -125,20 +131,57 @@ _OBJECT_PARSERS = {
 }
 
 
-def _parse_object(value: str, prefixes: dict[str, str]) -> str | int:
+def _parse_object(value: str, prefixes: dict[str, str], base: str | None = None) -> str | int | bool | float | bytes | datetime.datetime:
     """Parse a turtle object value."""
     value, _, type = value.partition("^^")
 
     value = f"<{_explode_prefix(value, prefixes)}>" if value in prefixes else _explode_prefix(value, prefixes)
     type = _explode_prefix(type, prefixes)
 
-    if value.startswith('"') and value.endswith('"'):
+    if value.startswith("<") and value.endswith(">"):
+        # Resolve (possibly relative) IRI references against the base IRI
+        value = f"<{_resolve_iri(value[1:-1], base)}>"
+    elif value.startswith('"') and value.endswith('"'):
         value = value[1:-1]
+    elif not type:
+        # A bare literal carries an implicit datatype based on its lexical form (integer, decimal, double
+        # or boolean). Resolve it here so callers get a native Python value instead of a string.
+        return _parse_bare_literal(value)
 
     if parser := _OBJECT_PARSERS.get(type):
         return parser(value)
 
     return value
+
+
+_RE_INTEGER = re.compile(r"^[+-]?\d+$")
+_RE_DOUBLE = re.compile(r"^[+-]?(\d+\.\d*|\.\d+|\d+)[eE][+-]?\d+$")
+_RE_DECIMAL = re.compile(r"^[+-]?(\d+\.\d*|\.\d+)$")
+
+
+def _parse_bare_literal(value: str) -> str | int | bool | float:
+    """Parse a bare (undatatyped) turtle literal into its native Python value."""
+    if value in ("true", "false"):
+        return value == "true"
+    if _RE_INTEGER.match(value):
+        return int(value)
+    if _RE_DOUBLE.match(value) or _RE_DECIMAL.match(value):
+        return float(value)
+    return value
+
+
+_RE_ABSOLUTE_IRI = re.compile(r"^[a-z][a-z0-9+.-]*:", re.IGNORECASE)
+
+
+def _resolve_iri(value: str, base: str | None) -> str:
+    """Resolve a (possibly relative) turtle IRI reference against the base IRI.
+
+    Absolute IRIs (those with a scheme, e.g. ``aff4://...``) are returned unchanged. Relative references,
+    including the empty reference ``<>`` which denotes the base IRI itself, are resolved against ``base``.
+    """
+    if base is None or _RE_ABSOLUTE_IRI.match(value):
+        return value
+    return urllib.parse.urljoin(base, value) if value else base
 
 
 def _explode_prefix(value: str, prefixes: dict[str, str]) -> str:

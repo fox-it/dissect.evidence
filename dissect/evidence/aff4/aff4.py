@@ -178,5 +178,14 @@ class Segment:
         Returns:
             A :class:`Path` or :class:`zipfile.Path` object representing the file.
         """
-        path = path.removeprefix(self.uri) if path.startswith(self.uri) else urllib.parse.quote_plus(path)
+        if path.startswith(self.uri):
+            path = path.removeprefix(self.uri)
+        else:
+            # Encode the IRI to its zip member name. The scheme and authority are percent-encoded
+            # (e.g. ``aff4://`` -> ``aff4%3A%2F%2F``), but path separators are kept intact.
+            parsed = urllib.parse.urlsplit(path)
+            if parsed.netloc:
+                path = urllib.parse.quote_plus(f"{parsed.scheme}://{parsed.netloc}") + parsed.path
+            else:
+                path = urllib.parse.quote_plus(path)
         return self.path.joinpath(path)
