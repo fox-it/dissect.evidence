@@ -31,6 +31,16 @@ struct block {
     uint64      size;           // Size of block in stream
 };
 
+// A structure to keep track of previously flushed tables
+struct table_index {
+    uint64      prev_table;     // Offset of the previous table, 0xFFFFFFFF_FFFFFFF denotes the last table
+    uint64      size;           // Amount of bytes of the table
+    // A 256-bit value divided over 4 64-bit values.
+    // A 1 at position x shows that there are table entries for stream x (1 << x).
+    // As an example, with 0b1000..1001, it shows that we have entries for streams 0, 3 and 255 inside this table.
+    uint64      indexes[4];
+};
+
 struct table_entry {
     BLOCK_FLAG  flags;          // Block flags
     uint8       idx;            // Stream index, some reserved values have special meaning

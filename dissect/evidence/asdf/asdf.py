@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import gzip
 import io
+import itertools
 import shutil
 import tarfile
 import uuid
 from bisect import bisect_right
 from collections import defaultdict
-from typing import TYPE_CHECKING, BinaryIO
+from typing import TYPE_CHECKING, Any, BinaryIO
 
 from dissect.util import ts
 from dissect.util.stream import AlignedStream, RangeStream
@@ -23,13 +24,13 @@ from dissect.evidence.exception import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
-
-SnapshotTableEntry = tuple[int, int, int, int]
+    from collections.abc import Iterator
 
 VERSION = 1
 DEFAULT_BLOCK_SIZE = 4096
 MAX_BLOCK_TABLE_SIZE = 2**32
+NO_PREVIOUS_TABLE = (1 << 64) - 1
+INDEX_MASK = NO_PREVIOUS_TABLE
 
 MAX_IDX = 253
 IDX_MEMORY = 254
@@ -40,6 +41,69 @@ FILE_MAGIC = b"ASDF"
 BLOCK_MAGIC = b"BL\xa5\xdf"
 FOOTER_MAGIC = b"FT\xa5\xdf"
 SPARSE_BYTES = b"\xa5\xdf"
+
+DEFAULT_TABLE_SIZE = 4 * 1024 * 1024 // len(c_asdf.table_entry)
+
+
+class WriteTable:
+    """Writes entries to a file header once a certain point gets reached."""
+
+    _table: dict[int, list[c_asdf.table_entry]]
+    """Keeps an order for the table entries for a specific stream"""
+    _lookup: dict[int, list[int]]
+    """Keeps an order for all the stream offsets for a specific stream"""
+    _entries: int
+    """The current number of entries inside of the table"""
+    last_table_offset: int
+    """Offset of the previously flushed table"""
+
+    def __init__(self) -> None:
+        self._table = defaultdict(list)
+        self._lookup = defaultdict(list)
+
+        self._entries = 0
+        self.last_table_offset = NO_PREVIOUS_TABLE
+
+    def __bool__(self):
+        return bool(self._table)
+
+    def __len__(self):
+        return self._entries
+
+    def get(self, index: int) -> tuple[list[c_asdf.table_entry], list[int]]:
+        return self._table[index], self._lookup[index]
+
+    def add(self, table_idx: int, entry: c_asdf.table_entry) -> None:
+        self._table[entry.idx].insert(table_idx, entry)
+        self._lookup[entry.idx].insert(table_idx, entry.offset)
+        self._entries += 1
+
+    def indexes(self) -> list[int]:
+        """Returns which stream indexes are inside this table.
+
+        Creates a 256-bit string that represends the stream indexes currently inside the table.
+        The bit string gets divided into 4 64-bit numbers.
+        """
+        indexes = sum(1 << key for key in self._table)
+        return [(indexes >> (x * 64)) & INDEX_MASK for x in range(4)]
+
+    def write(self, fh: BinaryIO) -> None:
+        """Writes a table directly to the fileheader."""
+        indexes = self.indexes()
+        result = [entry.dumps() for entry in itertools.chain(*self._table.values())]
+        index = c_asdf.table_index(
+            prev_table=self.last_table_offset, size=len(result) * len(c_asdf.table_entry), indexes=indexes
+        )
+        result.insert(0, index.dumps())
+
+        table_offset = fh.tell()
+        self.last_table_offset = table_offset
+
+        fh.writelines(result)
+
+        self._table.clear()
+        self._lookup.clear()
+        self._entries = 0
 
 
 class AsdfWriter(io.RawIOBase):
@@ -65,6 +129,7 @@ class AsdfWriter(io.RawIOBase):
         guid: uuid.UUID | None = None,
         compress: bool = False,
         block_crc: bool = True,
+        table_size: int = DEFAULT_TABLE_SIZE,
     ):
         self._fh = fh
         self.fh = self._fh
@@ -79,9 +144,11 @@ class AsdfWriter(io.RawIOBase):
         self.block_crc = block_crc
         self.block_compress = False  # Disabled for now
 
-        self._table = defaultdict(list)
-        self._table_lookup = defaultdict(list)
-        self._table_offset = 0
+        if table_size < 1:
+            raise ValueError("Table size can't be 0 or smaller")
+
+        self._max_entries = table_size
+        self._table = WriteTable()
 
         self._meta_buf = io.BytesIO()
         self._meta_tar = tarfile.open(fileobj=self._meta_buf, mode="w")  # noqa: SIM115
@@ -204,8 +271,8 @@ class AsdfWriter(io.RawIOBase):
         """
         super().close()
         self._write_meta()
-        if self._table:
-            self._write_table()
+        if len(self._table):
+            self.flush()
         self._write_footer()
         self.fh.close()
 
@@ -232,12 +299,9 @@ class AsdfWriter(io.RawIOBase):
         """
         absolute_offset = base + offset
 
-        lookup_table = self._table_lookup[idx]
-        entry_table = self._table[idx]
+        entry_table, lookup_table = self._table.get(idx)
 
-        table_idx, absolute_offset, size = _table_fit(
-            absolute_offset, size, entry_table, lookup_table, lambda e: (e[2], e[3])
-        )
+        table_idx, absolute_offset, size = _table_fit(absolute_offset, size, entry_table, lookup_table)
 
         if table_idx is None:
             return
@@ -271,9 +335,20 @@ class AsdfWriter(io.RawIOBase):
         outfh.finalize()
 
         data_size = self.fh.tell() - data_offset
+        self._table.add(
+            table_idx,
+            c_asdf.table_entry(
+                idx=idx,
+                offset=absolute_offset,
+                flags=flags,
+                size=size,
+                file_offset=block_offset,
+                file_size=data_size,
+            ),
+        )
 
-        lookup_table.insert(table_idx, absolute_offset)
-        entry_table.insert(table_idx, (flags, idx, absolute_offset, size, block_offset, data_size))
+        if len(self._table) >= self._max_entries:
+            self.flush()
 
     def _write_meta(self) -> None:
         """Write the metadata tar to the destination file-like object."""
@@ -283,29 +358,175 @@ class AsdfWriter(io.RawIOBase):
         self._meta_buf.seek(0)
         self.copy_bytes(self._meta_buf, 0, size, idx=IDX_METADATA)
 
-    def _write_table(self) -> None:
+    def flush(self) -> None:
         """Write the ASDF block table to the destination file-like object."""
-        self._table_offset = self.fh.tell()
-        for stream_table in self._table.values():
-            for flags, idx, offset, size, file_offset, file_size in stream_table:
-                table_entry = c_asdf.table_entry(
-                    flags=flags,
-                    idx=idx,
-                    offset=offset,
-                    size=size,
-                    file_offset=file_offset,
-                    file_size=file_size,
-                )
-                table_entry.write(self.fh)
+        self._table.write(self.fh)
 
     def _write_footer(self) -> None:
         """Write the ASDF footer to the destination file-like object."""
         footer = c_asdf.footer(
             magic=FOOTER_MAGIC,
-            table_offset=self._table_offset,
+            table_offset=self._table.last_table_offset,
             sha256=self.fh.digest(),
         )
         footer.write(self.fh)
+
+
+class ReadTable:
+    """A Table that reads stream entries from an asdf file.
+
+    It parses the table headers for all the tables it encounters.
+    A table gets parsed once it gets requested with :class:`ReadTable.get`
+    Unless scraping was used to read the table
+    """
+
+    _fh: BinaryIO = None
+    _table_offsets: list[tuple[int, c_asdf.table_index]] = None
+    """A list of (offsets, table metadata)"""
+    _table: dict[int, list[c_asdf.table_entry]] = None
+    """Keeps an order for the table entries for a specific stream"""
+    _lookup: dict[int, list[int]] = None
+    """Keeps an order for all the stream offsets for a specific stream"""
+    _available_stream_idx: set[int] = None
+    """Stream indexes inside of the table."""
+
+    def __init__(self, fh: BinaryIO) -> None:
+        self._fh = fh
+        self._table_offsets = []
+        self._table = defaultdict(list)
+        self._lookup = defaultdict(list)
+        self._available_stream_idx = set()
+
+    def __bool__(self):
+        return bool(self._table)
+
+    def __contains__(self, obj: Any) -> bool:
+        return obj in self._available_stream_idx
+
+    def __iter__(self) -> Iterator[int]:
+        yield from self._available_stream_idx
+
+    def get(self, index: int) -> tuple[list[c_asdf.table_entry], list[int]]:
+        # Read entries when they are needed
+        if self._table.get(index, None) is None:
+            self.read_entries(index)
+
+        return self._table[index], self._lookup[index]
+
+    def initialize(self, last_table_offset: int) -> None:
+        """Initializes the _table_offsets and the available streams inside the table."""
+        # Read all the tables and their offsets in reverse order
+        self._fh.seek(last_table_offset)
+        table_offsets = []
+        available_streams = set()
+        while True:
+            table_offset = self._fh.tell()
+            table_index = c_asdf.table_index(self._fh)
+            table_offsets.append((table_offset, table_index))
+
+            for tab_idx, table_indexes in enumerate(table_index.indexes):
+                available_streams.update(
+                    pos + tab_idx * 64 for pos in range(table_indexes.bit_length()) if table_indexes & (1 << pos)
+                )
+
+            # There is no previous table available
+            if table_index.prev_table == NO_PREVIOUS_TABLE:
+                break
+
+            self._fh.seek(table_index.prev_table)
+
+        self._available_stream_idx = available_streams
+        # Order the table offsets
+        table_offsets.reverse()
+        self._table_offsets = table_offsets
+
+    def clear(self, stream_idx: int | None = None) -> None:
+        """Cleans any internal table structure, besides _table_offsets."""
+        if stream_idx is None:
+            self._table.clear()
+            self._lookup.clear()
+
+        if stream_idx in self._table:
+            self._table[stream_idx].clear()
+            self._lookup[stream_idx].clear()
+
+    def read_entries(self, stream_idx: int | None = None) -> None:
+        """Read and insert stream entries inside the table.
+
+        This clears any previous stream entries
+
+        Args:
+            stream_idx: a specific stream to read.
+        """
+        self.clear(stream_idx)
+        iterator = self._read_entries() if stream_idx is None else self._read_stream_entries(stream_idx)
+        for entry in iterator:
+            self._insert(entry.idx, entry.offset, entry.size, entry.file_offset)
+
+    def _read_entries(self) -> Iterator[c_asdf.table_entry]:
+        """Read all stream entries in sequential order."""
+        for offset, table in self._table_offsets:
+            self._fh.seek(offset + len(c_asdf.table_index), io.SEEK_SET)
+            count = table.size // len(c_asdf.table_entry)
+            yield from c_asdf.table_entry[count](self._fh.read(table.size))
+
+    def _read_stream_entries(self, stream_idx: int) -> Iterator[c_asdf.table_entry]:
+        """Only read the stream entries belonging to ``stream_idx``."""
+        # Which parts of table.indexes to look into for a stream
+        index_idx = stream_idx // 64
+        lookup_value = 1 << (stream_idx % 64)
+
+        # Go through all previously flushed tables
+        for offset, table in self._table_offsets:
+            # Determine whether the stream_idx is inside this flushed table
+            index = table.indexes[index_idx]
+            if not (lookup_value & index):
+                # This table does not contain the index, so we continue to the next one
+                continue
+
+            self._fh.seek(offset + len(c_asdf.table_index), io.SEEK_SET)
+
+            count = table.size // len(c_asdf.table_entry)
+            for entry in c_asdf.table_entry[count](self._fh.read(table.size)):
+                # Determine whether this entry can be skipped
+                if stream_idx != entry.idx:
+                    continue
+
+                yield entry
+
+    def recover_blocks(self, offset: int) -> None:
+        """Recover the table using blocks found inside the streams."""
+        self.clear()
+        self._fh.seek(offset)
+        streams = set()
+        for block, file_offset in scrape_blocks(self._fh):
+            self._insert(block.idx, block.offset, block.size, file_offset)
+            streams.add(block.idx)
+
+        self._available_stream_idx = streams
+
+    def _insert(self, idx: int, offset: int, size: int, file_offset: int) -> None:
+        """Insert data inside the table."""
+        entry_data_offset = file_offset + len(c_asdf.block)
+
+        entry_table, lookup_table = self._table[idx], self._lookup[idx]
+
+        table_idx, entry_offset, entry_size = _table_fit(offset, size, entry_table, lookup_table)
+
+        if table_idx is None:
+            return
+
+        entry_data_offset += entry_offset - offset
+        entry = c_asdf.table_entry(
+            idx=idx,
+            offset=entry_offset,
+            size=entry_size,
+            file_offset=file_offset,
+            file_size=entry_data_offset,
+        )
+
+        entry_table.insert(table_idx, entry)
+        lookup_table.insert(table_idx, entry.offset)
 
 
 class AsdfSnapshot:
@@ -327,65 +548,19 @@ class AsdfSnapshot:
         self.timestamp = ts.from_unix(self.header.timestamp)
         self.guid = uuid.UUID(bytes_le=self.header.guid)
 
-        self.table: dict[list[SnapshotTableEntry]] = defaultdict(list)
-        self._table_lookup: dict[list[int]] = defaultdict(list)
+        self.table = ReadTable(self.fh)
 
-        footer_offset = self.fh.seek(-len(c_asdf.footer), io.SEEK_END)
-
+        self.fh.seek(-len(c_asdf.footer), io.SEEK_END)
         self.footer = c_asdf.footer(self.fh)
         if self.footer.magic != FOOTER_MAGIC:
             if recover:
-                self._recover_block_table()
+                self.table.recover_blocks(len(c_asdf.header))
             else:
                 raise InvalidSnapshot("invalid footer magic")
         else:
-            self._parse_block_table(
-                self.footer.table_offset,
-                (footer_offset - self.footer.table_offset) // len(c_asdf.table_entry),
-            )
+            self.table.initialize(self.footer.table_offset)
 
         self.metadata = Metadata(self)
-
-    def _parse_block_table(self, offset: int, count: int) -> None:
-        """Parse the block table, getting rid of overlapping blocks."""
-        self.fh.seek(offset)
-        table_data = io.BytesIO(self.fh.read(count * len(c_asdf.table_entry)))
-
-        for _ in range(count):
-            entry = c_asdf.table_entry(table_data)
-            self._table_insert(entry.idx, entry.offset, entry.size, entry.file_offset)
-
-    def _recover_block_table(self) -> None:
-        self.fh.seek(len(c_asdf.header))
-        for block, file_offset in scrape_blocks(self.fh):
-            self._table_insert(block.idx, block.offset, block.size, file_offset)
-
-    def _table_insert(self, idx: int, offset: int, size: int, file_offset: int) -> None:
-        stream_idx = idx
-        entry_data_offset = file_offset + len(c_asdf.block)
-
-        lookup_table = self._table_lookup[stream_idx]
-        entry_table = self.table[stream_idx]
-
-        table_idx, entry_offset, entry_size = _table_fit(
-            offset, size, entry_table, lookup_table, lambda e: (e[0], e[1])
-        )
-
-        if table_idx is None:
-            return
-
-        entry_data_offset += entry_offset - offset
-
-        lookup_table.insert(table_idx, entry_offset)
-        entry_table.insert(
-            table_idx,
-            (
-                entry_offset,
-                entry_size,
-                file_offset,
-                entry_data_offset,
-            ),
-        )
 
     def contains(self, idx: int) -> bool:
         """Check whether this file contains the given stream index.
@@ -407,12 +582,12 @@ class AsdfSnapshot:
 
     def streams(self) -> Iterator[AsdfStream]:
         """Iterate over all streams in the file."""
-        for i in sorted(self.table.keys()):
+        for i in sorted(self.table):
             yield self.open(i)
 
     def disks(self) -> Iterator[AsdfStream]:
         """Iterate over all non-reserved streams in the file."""
-        for i in sorted(self.table.keys()):
+        for i in sorted(self.table):
             if i in RESERVED_IDX:
                 continue
             yield self.open(i)
@@ -459,12 +634,11 @@ class AsdfStream(AlignedStream):
         self.fh = asdf.fh
         self.asdf = asdf
         self.idx = idx
-        self.table = asdf.table[idx]
-        self._table_lookup = asdf._table_lookup[idx]
+        self.table, self._table_lookup = asdf.table.get(idx)
 
         # We don't actually know the size of the source disk
         # Doesn't really matter though, just take the last run offset + size
-        size = self.table[-1][0] + self.table[-1][1]
+        size = self.table[-1].offset + self.table[-1].size
         super().__init__(size)
 
     def _read(self, offset: int, length: int) -> bytes:
@@ -473,15 +647,12 @@ class AsdfStream(AlignedStream):
         size = self.size
         run_idx = bisect_right(self._table_lookup, offset) - 1
         runlist_len = len(self.table)
-
         while length > 0 and run_idx < runlist_len:
-            run_start, run_size, run_file_offset, run_data_offset = self.table[run_idx]
-            run_end = run_start + run_size
+            entry = self.table[run_idx]
+            run_data_offset = entry.file_size
+            run_end = entry.offset + entry.size
 
-            if run_idx + 1 < runlist_len:
-                next_run_start, _, _, _ = self.table[run_idx + 1]
-            else:
-                next_run_start = None
+            next_run_start = self.table[run_idx + 1].offset if (run_idx + 1 < runlist_len) else None
 
             if run_idx < 0:
                 # Missing first block
@@ -510,20 +681,20 @@ class AsdfStream(AlignedStream):
 
                 # Proceed to next run
                 run_idx += 1
-            elif offset < run_start:
+            elif offset < entry.offset:
                 # Previous run consumed, and next run is far away
-                sparse_remaining = run_start - offset
+                sparse_remaining = entry.offset - offset
                 read_count = min(size - offset, min(sparse_remaining, length))
                 result.append(SPARSE_BYTES * (read_count // len(SPARSE_BYTES)))
 
                 # Don't proceed to next run, next loop iteration we'll be within the current run
             else:
                 # We're in a run with data
-                run_pos = offset - run_start
-                run_remaining = run_size - run_pos
+                run_pos = offset - entry.offset
+                run_remaining = entry.size - run_pos
                 read_count = min(size - offset, min(run_remaining, length))
 
-                self.fh.seek(run_file_offset)
+                self.fh.seek(entry.file_offset)
                 if self.fh.read(4) != BLOCK_MAGIC:
                     raise InvalidBlock("invalid block magic")
 
@@ -540,7 +711,7 @@ class AsdfStream(AlignedStream):
         return b"".join(result)
 
 
-def scrape_blocks(fh: BinaryIO, buffer_size: int = io.DEFAULT_BUFFER_SIZE) -> Iterator[c_asdf.block, int]:
+def scrape_blocks(fh: BinaryIO, buffer_size: int = io.DEFAULT_BUFFER_SIZE) -> Iterator[tuple[c_asdf.block, int]]:
     """Scrape for block headers in ``fh`` and yield parsed block headers and their offset.
 
     Args:
@@ -586,8 +757,11 @@ def scrape_blocks(fh: BinaryIO, buffer_size: int = io.DEFAULT_BUFFER_SIZE) -> It
 
 
 def _table_fit(
-    entry_offset: int, entry_size: int, entry_table: list, lookup_table: list, getentry: Callable
-) -> tuple[int, int, int]:
+    entry_offset: int,
+    entry_size: int,
+    entry_table: list[c_asdf.table_entry],
+    lookup_table: list[int],
+) -> tuple[int | None, int | None, int | None]:
     """Calculate where to insert an entry with the given offset and size into the entry table.
 
     Moves or shrinks the entry to prevent block overlap, and remove any overlapping blocks.
@@ -597,7 +771,6 @@ def _table_fit(
         entry_size: The entry size to calculate the insert for.
         entry_table: The entry table to insert into or remove entries from.
         lookup_table: The lookup table for the entry_table.
-        getentry: A callable to return the ``(offset, size)`` tuple from an entry.
 
     Returns:
         A tuple of the table index to insert into, an adjusted entry offset and an adjusted entry size.
@@ -610,10 +783,12 @@ def _table_fit(
 
     table_idx = bisect_right(lookup_table, entry_offset)
     if table_idx > 0:
-        prev_start, prev_size = getentry(entry_table[table_idx - 1])
+        _entry = entry_table[table_idx - 1]
+        prev_start, prev_size = _entry.offset, _entry.size
         prev_end = prev_start + prev_size
     if table_idx < len(lookup_table):
-        next_start, next_size = getentry(entry_table[table_idx])
+        _entry = entry_table[table_idx]
+        next_start, next_size = _entry.offset, _entry.size
         next_end = next_start + next_size
 
     if prev_end and prev_end >= entry_end:
@@ -630,7 +805,8 @@ def _table_fit(
         entry_table.pop(table_idx)
 
         if table_idx < len(lookup_table):
-            next_start, next_size = getentry(entry_table[table_idx])
+            _entry = entry_table[table_idx]
+            next_start, next_size = _entry.offset, _entry.size
             next_end = next_start + next_size
         else:
             next_start, next_end = None, None

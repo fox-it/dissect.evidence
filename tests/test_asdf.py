@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from dissect.evidence.asdf.asdf import AsdfSnapshot
+from dissect.evidence.asdf.asdf import DEFAULT_TABLE_SIZE, AsdfSnapshot, AsdfWriter
 from dissect.evidence.asdf.stream import CompressedStream, Crc32Stream, HashedStream
 from dissect.evidence.exception import InvalidSnapshot
 
@@ -32,7 +32,7 @@ def test_asdf(asdf_writer: AsdfWriter) -> None:
 
     reader = AsdfSnapshot(asdf_writer._fh)
     stream_0 = reader.open(0)
-    assert [(run_start, run_size) for run_start, run_size, _, _ in stream_0.table] == [
+    assert [(entry.offset, entry.size) for entry in stream_0.table] == [
         (0, 0x1000),
         (0x4000, 0x1000),
         (0x8000, 0x1000),
@@ -66,16 +66,21 @@ def test_asdf(asdf_writer: AsdfWriter) -> None:
 def test_asdf_overlap(asdf_writer: AsdfWriter) -> None:
     asdf_writer.add_bytes(b"\x01" * 100, base=0)
     asdf_writer.add_bytes(b"\x02" * 100, base=200)
-    assert asdf_writer._table_lookup[0] == [0, 200]
+
+    if asdf_writer._max_entries == DEFAULT_TABLE_SIZE:
+        assert asdf_writer._table._lookup[0] == [0, 200]
 
     asdf_writer.add_bytes(b"\x03" * 100, base=50)
-    assert asdf_writer._table_lookup[0] == [0, 100, 200]
+    if asdf_writer._max_entries == DEFAULT_TABLE_SIZE:
+        assert asdf_writer._table._lookup[0] == [0, 100, 200]
 
     asdf_writer.add_bytes(b"\x04" * 150, base=100)
-    assert asdf_writer._table_lookup[0] == [0, 100, 150, 200]
+    if asdf_writer._max_entries == DEFAULT_TABLE_SIZE:
+        assert asdf_writer._table._lookup[0] == [0, 100, 150, 200]
 
     asdf_writer.add_bytes(b"\x05" * 50, base=25)
-    assert asdf_writer._table_lookup[0] == [0, 100, 150, 200]
+    if asdf_writer._max_entries == DEFAULT_TABLE_SIZE:
+        assert asdf_writer._table._lookup[0] == [0, 100, 150, 200]
 
     asdf_writer.close()
     asdf_writer._fh.seek(0)
@@ -83,7 +88,7 @@ def test_asdf_overlap(asdf_writer: AsdfWriter) -> None:
     reader = AsdfSnapshot(asdf_writer._fh)
     stream = reader.open(0)
 
-    assert [(run_start, run_size) for run_start, run_size, _, _ in stream.table] == [
+    assert [(entry.offset, entry.size) for entry in stream.table] == [
         (0, 100),
         (100, 50),
         (150, 50),
@@ -97,9 +102,14 @@ def test_asdf_overlap_all(asdf_writer: AsdfWriter) -> None:
     asdf_writer.add_bytes(b"\x02" * 100, base=200)
     asdf_writer.add_bytes(b"\x03" * 100, base=50)
     asdf_writer.add_bytes(b"\x04" * 150, base=100)
-    assert asdf_writer._table_lookup[0] == [0, 100, 150, 200]
+
+    if asdf_writer._max_entries == DEFAULT_TABLE_SIZE:
+        assert asdf_writer._table._lookup[0] == [0, 100, 150, 200]
+
     asdf_writer.add_bytes(b"\x06" * 400, base=0)
-    assert asdf_writer._table_lookup[0] == [0, 100]
+
+    if asdf_writer._max_entries == DEFAULT_TABLE_SIZE:
+        assert asdf_writer._table._lookup[0] == [0, 100]
 
     asdf_writer.close()
     asdf_writer._fh.seek(0)
@@ -107,7 +117,7 @@ def test_asdf_overlap_all(asdf_writer: AsdfWriter) -> None:
     reader = AsdfSnapshot(asdf_writer._fh)
     stream = reader.open(0)
 
-    assert [(run_start, run_size) for run_start, run_size, _, _ in stream.table] == [
+    assert [(entry.offset, entry.size) for entry in stream.table] == [
         (0, 100),
         (100, 300),
     ]
@@ -117,10 +127,14 @@ def test_asdf_overlap_all(asdf_writer: AsdfWriter) -> None:
 def test_asdf_overlap_contiguous(asdf_writer: AsdfWriter) -> None:
     asdf_writer.add_bytes(b"\x01" * 100, base=0)
     asdf_writer.add_bytes(b"\x02" * 100, base=100)
-    assert asdf_writer._table_lookup[0] == [0, 100]
+
+    if asdf_writer._max_entries == DEFAULT_TABLE_SIZE:
+        assert asdf_writer._table._lookup[0] == [0, 100]
 
     asdf_writer.add_bytes(b"\x03" * 75, base=50)
-    assert asdf_writer._table_lookup[0] == [0, 100]
+
+    if asdf_writer._max_entries == DEFAULT_TABLE_SIZE:
+        assert asdf_writer._table._lookup[0] == [0, 100]
 
     asdf_writer.close()
     asdf_writer._fh.seek(0)
@@ -128,7 +142,7 @@ def test_asdf_overlap_contiguous(asdf_writer: AsdfWriter) -> None:
     reader = AsdfSnapshot(asdf_writer._fh)
     stream = reader.open(0)
 
-    assert [(run_start, run_size) for run_start, run_size, _, _ in stream.table] == [
+    assert [(entry.offset, entry.size) for entry in stream.table] == [
         (0, 100),
         (100, 100),
     ]
@@ -139,7 +153,9 @@ def test_asdf_overlap_seek(asdf_writer: AsdfWriter) -> None:
     asdf_writer.add_bytes(b"\x00" * 100, base=0)
     asdf_writer.add_bytes(b"\x00" * 100, base=200)
     asdf_writer.add_bytes(bytes(range(200)), base=50)
-    assert asdf_writer._table_lookup[0] == [0, 100, 200]
+
+    if asdf_writer._max_entries == DEFAULT_TABLE_SIZE:
+        assert asdf_writer._table._lookup[0] == [0, 100, 200]
 
     asdf_writer.close()
     asdf_writer._fh.seek(0)
@@ -147,7 +163,7 @@ def test_asdf_overlap_seek(asdf_writer: AsdfWriter) -> None:
     reader = AsdfSnapshot(asdf_writer._fh)
     stream = reader.open(0)
 
-    assert [(run_start, run_size) for run_start, run_size, _, _ in stream.table] == [
+    assert [(entry.offset, entry.size) for entry in stream.table] == [
         (0, 100),
         (100, 100),
         (200, 100),
@@ -241,7 +257,7 @@ def test_asdf_scrape(asdf_writer: AsdfWriter) -> None:
     reader = AsdfSnapshot(asdf_writer._fh, recover=True)
     stream = reader.open(0)
 
-    assert [(run_start, run_size) for run_start, run_size, _, _ in stream.table] == [
+    assert [(entry.offset, entry.size) for entry in stream.table] == [
         (0, 0x1000),
         (0x4000, 0x1000),
         (0x8000, 0x1000),

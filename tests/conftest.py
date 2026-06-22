@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, BinaryIO
 
 import pytest
 
-from dissect.evidence.asdf import AsdfWriter
+from dissect.evidence.asdf.asdf import DEFAULT_TABLE_SIZE, AsdfWriter
 from tests._utils import absolute_path
 
 if TYPE_CHECKING:
@@ -101,11 +101,16 @@ def ewf_encrypted_certificate() -> Iterator[BinaryIO]:
     yield from open_data("_data/ewf/encrypted-certificate/encrypted.E01")
 
 
-@pytest.fixture
-def asdf_writer() -> AsdfWriter:
+@pytest.fixture(
+    params=[
+        pytest.param(1, id="table_size=1"),
+        pytest.param(DEFAULT_TABLE_SIZE, id="table_size=DEFAULT"),
+    ]
+)
+def asdf_writer(request: pytest.FixtureRequest) -> AsdfWriter:
     def noop() -> None:
         pass
 
     fh = BytesIO()
     fh.close = noop  # Prevent clearing the buffer, we need it
-    return AsdfWriter(fh)
+    return AsdfWriter(fh, table_size=request.param)

@@ -18,6 +18,7 @@ class SubStreamBase(io.RawIOBase):
 
     def __init__(self, fh: BinaryIO):
         self.fh = fh
+        self.read = fh.read
 
     def write(self, b: bytes) -> int:
         return self.fh.write(b)
