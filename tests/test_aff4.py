@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 
 from dissect.evidence.aff4.aff4 import AFF4
+from dissect.evidence.aff4.metadata import APFSContainerImage, DiscontiguousImage, ImageStream, Map
+from dissect.evidence.aff4.util import CompressionMethod
 from tests.conftest import absolute_path
 
 
@@ -13,9 +15,9 @@ def test_aff4_linear() -> None:
     assert segment.uri == "aff4://685e15cc-d0fb-4dbc-ba47-48117fc77044"
     assert segment.version == {"major": "1", "minor": "0", "tool": "Evimetry 2.2.0"}
 
-    assert len(aff4.disks()) == 1
+    assert len(aff4.images()) == 1
 
-    image = aff4.disks()[0]
+    image = aff4.images()[0]
     map_stream = image.data_stream.open()
 
     assert hashlib.sha1(map_stream.streams[0].read()).hexdigest() == "fbac22cca549310bc5df03b7560afcf490995fbb"
@@ -26,9 +28,9 @@ def test_aff4_linear() -> None:
 
 def test_aff4_allocated() -> None:
     aff4 = AFF4(absolute_path("_data/aff4/Base-Allocated.aff4"))
-    assert len(aff4.disks()) == 1
+    assert len(aff4.images()) == 1
 
-    image = aff4.disks()[0]
+    image = aff4.images()[0]
     stream = image.open()
 
     assert stream.read(32) == bytes.fromhex("33c08ed0bc007c8ec08ed8be007cbf0006b90002fcf3a450681c06cbfbb90400")
@@ -45,9 +47,9 @@ def test_aff4_allocated() -> None:
 
 def test_aff4_read_error() -> None:
     aff4 = AFF4(absolute_path("_data/aff4/Base-Linear-ReadError.aff4"))
-    assert len(aff4.disks()) == 1
+    assert len(aff4.images()) == 1
 
-    image = aff4.disks()[0]
+    image = aff4.images()[0]
     stream = image.open()
 
     stream.seek(15728640)
@@ -56,9 +58,9 @@ def test_aff4_read_error() -> None:
 
 def test_aff4_exabyte_sparse() -> None:
     aff4 = AFF4(absolute_path("_data/aff4/Base-ExabyteSparse.aff4"))
-    assert len(aff4.disks()) == 1
+    assert len(aff4.images()) == 1
 
-    image = aff4.disks()[0]
+    image = aff4.images()[0]
     stream = image.open()
 
     stream.seek(1048576)
@@ -68,6 +70,67 @@ def test_aff4_exabyte_sparse() -> None:
     assert stream.read(512)[-2:] == b"\x55\xaa"
 
 
+def test_aff4_discontiguous() -> None:
+    aff4 = AFF4(absolute_path("_data/aff4/Base-Discontiguous.aff4"))
+
+    # A DiscontiguousImage is not a DiskImage, but it is an Image, so images() surfaces it.
+    assert len(aff4.images()) == 1
+
+    image = aff4.images()[0]
+    assert isinstance(image, DiscontiguousImage)
+    assert image.size == 65536
+    assert image.block_size == 4096
+
+    # The image maps onto a Map data stream backed by an lz4 bevy ImageStream.
+    assert isinstance(image.data_stream, Map)
+    assert image.data_stream.size == 65536
+
+    (stream_obj,) = aff4.information.find("ImageStream")
+    assert stream_obj.chunk_size == 32768
+    assert stream_obj.compression_method is CompressionMethod.LZ4
+
+    stream = image.open()
+
+    # Leading sparse region falls back to the Zero gap stream.
+    stream.seek(0)
+    assert stream.read(512) == b"\x00" * 512
+
+    # Populated block, read from the bevy ImageStream.
+    stream.seek(32768)
+    chunk = stream.read(32768)
+    assert hashlib.sha1(chunk).hexdigest() == "250cc926052d2c85c867ae6482b824464190a5fe"
+    assert hashlib.md5(chunk).hexdigest() == "8bccb0aff9d7ac4a617e66d64af8ed5b"
+
+    # The ImageStream declares aff4:hash over its reconstructed content (SHA1, then MD5); they match.
+    assert stream_obj.hash == [hashlib.sha1(chunk).hexdigest(), hashlib.md5(chunk).hexdigest()]
+
+    # A read spanning the gap/data boundary stitches both together.
+    stream.seek(32256)
+    assert stream.read(1024) == (b"\x00" * 512) + chunk[:512]
+
+
+def test_aff4_apfs_container_image() -> None:
+    aff4 = AFF4(absolute_path("_data/aff4/Base-Discontiguous.aff4"))
+
+    image = aff4.images()[0]
+
+    # The bbt:APFSContainerImage type wins (longest MRO) so the object is the vendor subclass,
+    # while still being a DiscontiguousImage.
+    assert isinstance(image, APFSContainerImage)
+    assert isinstance(image, DiscontiguousImage)
+
+    # Vendor (BlackBag) bbt: metadata.
+    assert image.apfs_container_type == "https://blackbagtech.com/aff4/Schema#APFST2ContainerType"
+    assert image.contains_extents is True
+    assert image.contains_unallocated is True
+
+    # integrityStream resolves to the backing bevy ImageStream.
+    integrity = image.integrity_stream
+    assert isinstance(integrity, ImageStream)
+    assert integrity.chunk_size == 32768
+    assert integrity.size == 32768
+
+
 def test_aff4_striped() -> None:
     aff4 = AFF4(
         [
@@ -75,9 +138,9 @@ def test_aff4_striped() -> None:
             absolute_path("_data/aff4/striped/Base-Linear_2.aff4"),
         ]
     )
-    assert len(aff4.disks()) == 1
+    assert len(aff4.images()) == 1
 
-    image = aff4.disks()[0]
+    image = aff4.images()[0]
     stream = image.open()
 
     stream.seek(0)

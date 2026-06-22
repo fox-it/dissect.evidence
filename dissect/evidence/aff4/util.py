@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import datetime
-import re
 import urllib.parse
 from enum import Enum
 from typing import TYPE_CHECKING, TextIO
@@ -12,6 +11,7 @@ if TYPE_CHECKING:
 NS_XSD = "http://www.w3.org/2001/XMLSchema#"
 NS_RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
 NS_AFF4 = "http://aff4.org/Schema#"
+NS_BBT = "https://blackbagtech.com/aff4/Schema#"
 
 
 class CompressionMethod(Enum):
@@ -154,23 +154,13 @@ def _parse_object(value: str, prefixes: dict[str, str], base: str | None = None)
     return value
 
 
-_RE_INTEGER = re.compile(r"^[+-]?\d+$")
-_RE_DOUBLE = re.compile(r"^[+-]?(\d+\.\d*|\.\d+|\d+)[eE][+-]?\d+$")
-_RE_DECIMAL = re.compile(r"^[+-]?(\d+\.\d*|\.\d+)$")
-
-
 def _parse_bare_literal(value: str) -> str | int | bool | float:
     """Parse a bare (undatatyped) turtle literal into its native Python value."""
     if value in ("true", "false"):
         return value == "true"
-    if _RE_INTEGER.match(value):
+    if value[0].isdigit():
         return int(value)
-    if _RE_DOUBLE.match(value) or _RE_DECIMAL.match(value):
-        return float(value)
     return value
-
-
-_RE_ABSOLUTE_IRI = re.compile(r"^[a-z][a-z0-9+.-]*:", re.IGNORECASE)
 
 
 def _resolve_iri(value: str, base: str | None) -> str:
@@ -179,7 +169,7 @@ def _resolve_iri(value: str, base: str | None) -> str:
     Absolute IRIs (those with a scheme, e.g. ``aff4://...``) are returned unchanged. Relative references,
     including the empty reference ``<>`` which denotes the base IRI itself, are resolved against ``base``.
     """
-    if base is None or _RE_ABSOLUTE_IRI.match(value):
+    if base is None or ":" in value:
         return value
     return urllib.parse.urljoin(base, value) if value else base
 

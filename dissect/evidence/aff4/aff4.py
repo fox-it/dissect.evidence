@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
     from typing_extensions import Self
 
-    from dissect.evidence.aff4.metadata import DiskImage, FileImage, Object, ValueType
+    from dissect.evidence.aff4.metadata import FileImage, Image, Object, ValueType
 
 MAX_OPEN_SEGMENTS = 128
 
@@ -97,9 +97,13 @@ class AFF4:
 
         return segment
 
-    def disks(self) -> list[DiskImage]:
-        """List all disk images in the AFF4 evidence."""
-        return list(self.information.find("DiskImage"))
+    def images(self) -> list[Image]:
+        """List all images in the AFF4 evidence.
+
+        An image is typed ``aff4:Image`` and is either contiguous (e.g. ``aff4:DiskImage``) or
+        sparse (``aff4:DiscontiguousImage``, e.g. APFS physical images).
+        """
+        return list(self.information.find("Image"))
 
     def files(self) -> list[FileImage]:
         """List all file images in the AFF4 evidence."""
