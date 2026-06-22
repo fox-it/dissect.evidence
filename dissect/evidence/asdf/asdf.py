@@ -42,6 +42,12 @@ FOOTER_MAGIC = b"FT\xa5\xdf"
 SPARSE_BYTES = b"\xa5\xdf"
 
 
+CHECKSUM_MAPPING: dict[int, str] = {
+    c_asdf.CHECKSUM.SHA256: 32,
+    c_asdf.CHECKSUM.SHA512: 64,
+}
+
+
 class AsdfWriter(io.RawIOBase):
     """ASDF file writer.
 
@@ -65,6 +71,7 @@ class AsdfWriter(io.RawIOBase):
         guid: uuid.UUID | None = None,
         compress: bool = False,
         block_crc: bool = True,
+        checksum_algorithm: c_asdf.CHECKSUM = c_asdf.CHECKSUM.SHA256,
     ):
         self._fh = fh
         self.fh = self._fh
@@ -72,7 +79,12 @@ class AsdfWriter(io.RawIOBase):
         if compress:
             self.fh = gzip.GzipFile(fileobj=self.fh, mode="wb")
 
-        self.fh = HashedStream(self.fh)
+        if checksum_algorithm not in CHECKSUM_MAPPING:
+            raise ValueError("Unsupported hashing algorithm used")
+
+        self.checksum = c_asdf.CHECKSUM(checksum_algorithm)
+        self.fh = HashedStream(self.fh, alg=self.checksum.name)
+
         self.guid = guid or uuid.uuid4()
 
         # Options
@@ -213,7 +225,8 @@ class AsdfWriter(io.RawIOBase):
         """Write the ASDF header to the destination file-like object."""
         header = c_asdf.header(
             magic=FILE_MAGIC,
-            flags=c_asdf.FILE_FLAG.SHA256,  # Currently the only option
+            flags=c_asdf.FILE_FLAG.CHECKSUM,  # Currently the only option
+            checksum=self.checksum,
             version=VERSION,
             timestamp=ts.unix_now(),
             guid=self.guid.bytes_le,
@@ -300,10 +313,10 @@ class AsdfWriter(io.RawIOBase):
 
     def _write_footer(self) -> None:
         """Write the ASDF footer to the destination file-like object."""
+        self.fh.write(self.fh.digest())
         footer = c_asdf.footer(
             magic=FOOTER_MAGIC,
             table_offset=self._table_offset,
-            sha256=self.fh.digest(),
         )
         footer.write(self.fh)
 

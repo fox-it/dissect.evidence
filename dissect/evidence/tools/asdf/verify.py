@@ -63,6 +63,7 @@ def main() -> int:
     with Path(args.file).open("rb") as fh:
         header = None
         footer = None
+        checksum = None
         footer_offset = 0
 
         with status("Checking header", args.verbose):
@@ -71,9 +72,12 @@ def main() -> int:
                 print("[!] Invalid header magic")
                 return 1
 
+        checksum_size = asdf.CHECKSUM_MAPPING.get(header.checksum, 0)
+
         with status("Checking footer", args.verbose):
-            fh.seek(-len(asdf.c_asdf.footer), io.SEEK_END)
+            fh.seek(-(len(asdf.c_asdf.footer) + checksum_size), io.SEEK_END)
             footer_offset = fh.tell()
+            checksum = fh.read(checksum_size)
             footer = asdf.c_asdf.footer(fh)
             if footer.magic != asdf.FOOTER_MAGIC:
                 footer = None
@@ -83,9 +87,10 @@ def main() -> int:
         if not args.skip_hash and footer:
             with status("Checking file hash", args.verbose):
                 hashstream = RangeStream(fh, 0, footer_offset)
-                res = hash_fileobj(hashstream)
-                if res != footer.sha256:
-                    print(f"[!] File hash doesn't match. Expected {footer.sha256.hex()}, got {res.hex()}")
+                res = hash_fileobj(hashstream, alg=header.checksum.name.lower())
+
+                if res != checksum:
+                    print(f"[!] File hash doesn't match. Expected {checksum.hex()}, got {res.hex()}")
                     return 1
         else:
             print("[@] Skipping file hash")
