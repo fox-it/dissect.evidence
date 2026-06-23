@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import struct
 import zlib
 from bisect import bisect_right
@@ -13,6 +14,9 @@ from dissect.evidence.aff4.util import NS_AFF4, CompressionMethod
 
 if TYPE_CHECKING:
     from dissect.evidence.aff4.metadata import ImageStream, Information, Map
+
+CHUNK_CACHE_SIZE = int(os.getenv("DISSECT_AFF4_CHUNK_CACHE_SIZE", 512))
+BEVY_CACHE_SIZE = int(os.getenv("DISSECT_AFF4_BEVY_CACHE_SIZE", 8))
 
 
 def _open_stream(ctx: Information, id: str) -> BinaryIO:
@@ -105,8 +109,8 @@ class BevyStream(AlignedStream):
 
         self.compression_method = self.stream.compression_method
 
-        self._open_bevy = lru_cache(maxsize=8)(self._open_bevy)
-        self._read_chunk = lru_cache(maxsize=512)(self._read_chunk)
+        self._open_bevy = lru_cache(maxsize=BEVY_CACHE_SIZE)(self._open_bevy)
+        self._read_chunk = lru_cache(maxsize=CHUNK_CACHE_SIZE)(self._read_chunk)
 
         super().__init__(self.stream.size, self.stream.chunk_size)
 
@@ -124,7 +128,7 @@ class BevyStream(AlignedStream):
 
         return bevy_path.open("rb"), index
 
-    def _read_chunk(self, bevy_idx: int, chunk_idx: int) -> bytes:
+    def _read_chunk(self, chunk_idx: int) -> bytes:
         bevy_idx = chunk_idx // self.stream.chunks_in_segment
         bevy_fh, index = self._open_bevy(bevy_idx)
 
@@ -155,7 +159,7 @@ class BevyStream(AlignedStream):
         chunk_idx, offset_in_chunk = divmod(offset, self.stream.chunk_size)
 
         while length > 0:
-            chunk = self._read_chunk(chunk_idx, chunk_idx)
+            chunk = self._read_chunk(chunk_idx)
             read_size = min(length, self.stream.chunk_size - offset_in_chunk)
 
             result.append(chunk[offset_in_chunk : offset_in_chunk + read_size])
