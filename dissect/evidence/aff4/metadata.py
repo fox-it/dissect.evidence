@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, ClassVar, TypeAlias
 from dissect.util.stream import BufferedStream
 
 from dissect.evidence.aff4.stream import BevyStream, MapStream
-from dissect.evidence.aff4.util import NS_AFF4, NS_RDF, CompressionMethod
+from dissect.evidence.aff4.util import NS_AFF4, NS_BBT, NS_RDF, CompressionMethod
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -111,13 +111,13 @@ class Object:
             return self.ctx.get(value) or UnresolvedObject(self.ctx, value, {})
         return value
 
-    def get(self, predicate: str, *, prefix: str = NS_AFF4) -> ValueType | None:
+    def get(self, predicate: str, default: ValueType | None = None, *, prefix: str = NS_AFF4) -> ValueType | None:
         """Get a property of the object."""
         if (result := self.values.get(f"{prefix}{predicate}")) is not None:
             if isinstance(result, list):
                 result = [self._transform_value(r) for r in result]
-            result = self._transform_value(result)
-        return result
+            return self._transform_value(result)
+        return default
 
 
 class UnresolvedObject(Object):
@@ -150,8 +150,8 @@ class Map(Object):
 
     @property
     def map_gap_default_stream(self) -> str:
-        """Return the default gap stream type."""
-        return self["mapGapDefaultStream"]
+        """Return the default gap stream type, defaulting to the ``Zero`` symbolic stream."""
+        return self.get("mapGapDefaultStream", f"{NS_AFF4}Zero")
 
     @property
     def dependent_stream(self) -> ImageStream | list[ImageStream]:
@@ -159,9 +159,9 @@ class Map(Object):
         return self["dependentStream"]
 
     @property
-    def target(self) -> Object:
+    def target(self) -> Object | None:
         """Return the target (parent) object."""
-        return self["target"]
+        return self.get("target")
 
     @property
     def stored(self) -> Object:
@@ -198,7 +198,8 @@ class ImageStream(Object):
     __type__ = f"{NS_AFF4}ImageStream"
 
     def __repr__(self) -> str:
-        return f"<{self.__class__.__name__} {self.id} target={self.target.id} stored={self.stored.id}>"
+        target = self.target.id if self.target else None
+        return f"<{self.__class__.__name__} {self.id} target={target} stored={self.stored.id}>"
 
     @property
     def chunk_size(self) -> int:
@@ -216,14 +217,19 @@ class ImageStream(Object):
         return self["compressionMethod"]
 
     @property
+    def hash(self) -> str | list[str]:
+        """Return the hash(es) of the (reconstructed) image stream, if present."""
+        return self["hash"]
+
+    @property
     def size(self) -> int:
         """Return the size of the image stream."""
         return self["size"]
 
     @property
-    def target(self) -> Object:
+    def target(self) -> Object | None:
         """Return the target (parent) object."""
-        return self["target"]
+        return self.get("target")
 
     @property
     def stored(self) -> Object:
@@ -244,9 +250,9 @@ class Image(Object):
         return f"<{self.__class__.__name__} {self.id} hash={self.hash}>"
 
     @property
-    def hash(self) -> str | list[str]:
+    def hash(self) -> str | list[str] | None:
         """Return the hash(es) of the image."""
-        return self["hash"]
+        return self.get("hash")
 
     @property
     def size(self) -> int:
@@ -274,10 +280,50 @@ class ContiguousImage(Image):
         return BufferedStream(self.data_stream.open(), size=self.size)
 
 
+class DiscontiguousImage(ContiguousImage):
+    """AFF4 DiscontiguousImage object.
+
+    A sparse image whose ``dataStream`` is typically a :class:`Map`, mapping populated regions to
+    underlying streams and filling the gaps with the map's default gap stream.
+    """
+
+    __type__ = f"{NS_AFF4}DiscontiguousImage"
+
+
 class DiskImage(ContiguousImage):
     """AFF4 DiskImage object."""
 
     __type__ = f"{NS_AFF4}DiskImage"
+
+
+class APFSContainerImage(DiscontiguousImage):
+    """BlackBag APFS container image.
+
+    A vendor (BlackBag Technologies) extension typed ``bbt:APFSContainerImage``: a sparse
+    :class:`DiscontiguousImage` of an APFS container, carrying extra ``bbt:`` metadata.
+    """
+
+    __type__ = f"{NS_BBT}APFSContainerImage"
+
+    @property
+    def apfs_container_type(self) -> str:
+        """Return the APFS container type (e.g. ``bbt:APFST2ContainerType``)."""
+        return self.get("APFSContainerType", prefix=NS_BBT)
+
+    @property
+    def contains_extents(self) -> bool:
+        """Return whether the image contains (allocated) extents."""
+        return self.get("ContainsExtents", prefix=NS_BBT)
+
+    @property
+    def contains_unallocated(self) -> bool:
+        """Return whether the image contains unallocated data."""
+        return self.get("ContainsUnallocated", prefix=NS_BBT)
+
+    @property
+    def integrity_stream(self) -> Object:
+        """Return the stream used to verify the integrity of the image."""
+        return self.get("integrityStream", prefix=NS_BBT)
 
 
 class FileImage(Image):
@@ -374,9 +420,9 @@ class CaseDetails(Object):
         return self["stored"]
 
     @property
-    def target(self) -> Object:
+    def target(self) -> Object | None:
         """Return the target (parent) object."""
-        return self["target"]
+        return self.get("target")
 
 
 class CaseNotes(Object):
@@ -421,9 +467,9 @@ class CaseNotes(Object):
         return self["stored"]
 
     @property
-    def target(self) -> Object:
+    def target(self) -> Object | None:
         """Return the target (parent) object."""
-        return self["target"]
+        return self.get("target")
 
 
 class TimeStamps(Object):

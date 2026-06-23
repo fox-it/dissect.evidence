@@ -43,7 +43,9 @@ class MapStream(AlignedStream):
         self.default_gap_stream = _open_stream(self.map.ctx, self.map.map_gap_default_stream)
         self.streams = [_open_stream(self.map.ctx, entry) for entry in self.map.index]
         self.stream_map = self.map.map
-        self._lookup = list(self.map.map.keys())
+        # Map entries are keyed by their end offset. ``_read`` binary searches this with ``bisect_right``,
+        # which requires the keys to be sorted ascending. The on-disk map is not guaranteed to be ordered.
+        self._lookup = sorted(self.stream_map.keys())
 
         super().__init__(self.map.size)
 

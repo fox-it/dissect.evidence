@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import urllib.parse
 from enum import Enum
 from typing import TYPE_CHECKING, TextIO
 
@@ -10,6 +11,7 @@ if TYPE_CHECKING:
 NS_XSD = "http://www.w3.org/2001/XMLSchema#"
 NS_RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
 NS_AFF4 = "http://aff4.org/Schema#"
+NS_BBT = "https://blackbagtech.com/aff4/Schema#"
 
 
 class CompressionMethod(Enum):
@@ -29,6 +31,7 @@ def parse_turtle(fh: TextIO) -> dict[str, str]:
     """
     objects = {}
     prefixes = {}
+    base = None
 
     parts = []
     for line in fh:
@@ -45,27 +48,33 @@ def parse_turtle(fh: TextIO) -> dict[str, str]:
             if full_statement.startswith("@prefix"):
                 _, prefix, uri = full_statement.split(maxsplit=2)
                 prefixes[prefix] = uri.rstrip(".").strip()[1:-1]
+            elif full_statement.startswith("@base"):
+                _, uri = full_statement.split(maxsplit=1)
+                base = uri.rstrip(".").strip()[1:-1]
             else:
                 subject = None
-                for i, statement in enumerate(_iter_statements(full_statement, ";")):
+                for statement in _iter_statements(full_statement, ";"):
                     if subject is None:
                         subject, predicate, object = statement.split(maxsplit=2)
                         subject = _explode_prefix(subject.strip(), prefixes)
 
                         if subject.startswith("<") and subject.endswith(">"):
-                            subject = subject[1:-1]
+                            subject = _resolve_iri(subject[1:-1], base)
                     else:
                         predicate, object = statement.split(maxsplit=1)
 
                     predicate = predicate.strip()
                     object = object.strip()
 
-                    if i == 0 and predicate == "a":
+                    if predicate == "a":
                         predicate = f"{NS_RDF}type"
 
                     predicate = _explode_prefix(predicate, prefixes)
 
-                    if len(object := [_parse_object(obj, prefixes) for obj in _iter_statements(object, ",")]) == 1:
+                    if (
+                        len(object := [_parse_object(obj, prefixes, base) for obj in _iter_statements(object, ",")])
+                        == 1
+                    ):
                         object = object[0]
 
                     if subject not in objects:
@@ -125,20 +134,41 @@ _OBJECT_PARSERS = {
 }
 
 
-def _parse_object(value: str, prefixes: dict[str, str]) -> str | int:
+def _parse_object(
+    value: str, prefixes: dict[str, str], base: str | None = None
+) -> str | int | bool | float | bytes | datetime.datetime:
     """Parse a turtle object value."""
     value, _, type = value.partition("^^")
 
     value = f"<{_explode_prefix(value, prefixes)}>" if value in prefixes else _explode_prefix(value, prefixes)
     type = _explode_prefix(type, prefixes)
 
-    if value.startswith('"') and value.endswith('"'):
+    if value.startswith("<") and value.endswith(">"):
+        # Resolve (possibly relative) IRI references against the base IRI
+        value = f"<{_resolve_iri(value[1:-1], base)}>"
+    elif value.startswith('"') and value.endswith('"'):
         value = value[1:-1]
+    elif not type:
+        if value.lower() in ("true", "false"):
+            value = value.lower() == "true"
+        elif value[0].isdigit():
+            value = float(value) if "." in value else int(value)
 
     if parser := _OBJECT_PARSERS.get(type):
         return parser(value)
 
     return value
+
+
+def _resolve_iri(value: str, base: str | None) -> str:
+    """Resolve a (possibly relative) turtle IRI reference against the base IRI.
+
+    Absolute IRIs (those with a scheme, e.g. ``aff4://...``) are returned unchanged. Relative references,
+    including the empty reference ``<>`` which denotes the base IRI itself, are resolved against ``base``.
+    """
+    if base is None or ":" in value:
+        return value
+    return urllib.parse.urljoin(base, value) if value else base
 
 
 def _explode_prefix(value: str, prefixes: dict[str, str]) -> str:
