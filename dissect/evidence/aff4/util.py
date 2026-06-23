@@ -71,7 +71,10 @@ def parse_turtle(fh: TextIO) -> dict[str, str]:
 
                     predicate = _explode_prefix(predicate, prefixes)
 
-                    if len(object := [_parse_object(obj, prefixes, base) for obj in _iter_statements(object, ",")]) == 1:
+                    if (
+                        len(object := [_parse_object(obj, prefixes, base) for obj in _iter_statements(object, ",")])
+                        == 1
+                    ):
                         object = object[0]
 
                     if subject not in objects:
@@ -131,7 +134,9 @@ _OBJECT_PARSERS = {
 }
 
 
-def _parse_object(value: str, prefixes: dict[str, str], base: str | None = None) -> str | int | bool | float | bytes | datetime.datetime:
+def _parse_object(
+    value: str, prefixes: dict[str, str], base: str | None = None
+) -> str | int | bool | float | bytes | datetime.datetime:
     """Parse a turtle object value."""
     value, _, type = value.partition("^^")
 
@@ -144,22 +149,14 @@ def _parse_object(value: str, prefixes: dict[str, str], base: str | None = None)
     elif value.startswith('"') and value.endswith('"'):
         value = value[1:-1]
     elif not type:
-        # A bare literal carries an implicit datatype based on its lexical form (integer, decimal, double
-        # or boolean). Resolve it here so callers get a native Python value instead of a string.
-        return _parse_bare_literal(value)
+        if value.lower() in ("true", "false"):
+            value = value.lower() == "true"
+        elif value[0].isdigit():
+            value = float(value) if "." in value else int(value)
 
     if parser := _OBJECT_PARSERS.get(type):
         return parser(value)
 
-    return value
-
-
-def _parse_bare_literal(value: str) -> str | int | bool | float:
-    """Parse a bare (undatatyped) turtle literal into its native Python value."""
-    if value in ("true", "false"):
-        return value == "true"
-    if value[0].isdigit():
-        return int(value)
     return value
 
 

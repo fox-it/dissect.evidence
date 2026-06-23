@@ -159,9 +159,9 @@ class Map(Object):
         return self["dependentStream"]
 
     @property
-    def target(self) -> Object:
+    def target(self) -> Object | None:
         """Return the target (parent) object."""
-        return self["target"]
+        return self.get("target")
 
     @property
     def stored(self) -> Object:
@@ -198,7 +198,8 @@ class ImageStream(Object):
     __type__ = f"{NS_AFF4}ImageStream"
 
     def __repr__(self) -> str:
-        return f"<{self.__class__.__name__} {self.id} target={self.target.id} stored={self.stored.id}>"
+        target = self.target.id if self.target else None
+        return f"<{self.__class__.__name__} {self.id} target={target} stored={self.stored.id}>"
 
     @property
     def chunk_size(self) -> int:
@@ -226,9 +227,9 @@ class ImageStream(Object):
         return self["size"]
 
     @property
-    def target(self) -> Object:
+    def target(self) -> Object | None:
         """Return the target (parent) object."""
-        return self["target"]
+        return self.get("target")
 
     @property
     def stored(self) -> Object:
@@ -249,9 +250,9 @@ class Image(Object):
         return f"<{self.__class__.__name__} {self.id} hash={self.hash}>"
 
     @property
-    def hash(self) -> str | list[str]:
+    def hash(self) -> str | list[str] | None:
         """Return the hash(es) of the image."""
-        return self["hash"]
+        return self.get("hash")
 
     @property
     def size(self) -> int:
@@ -419,9 +420,9 @@ class CaseDetails(Object):
         return self["stored"]
 
     @property
-    def target(self) -> Object:
+    def target(self) -> Object | None:
         """Return the target (parent) object."""
-        return self["target"]
+        return self.get("target")
 
 
 class CaseNotes(Object):
@@ -466,9 +467,9 @@ class CaseNotes(Object):
         return self["stored"]
 
     @property
-    def target(self) -> Object:
+    def target(self) -> Object | None:
         """Return the target (parent) object."""
-        return self["target"]
+        return self.get("target")
 
 
 class TimeStamps(Object):

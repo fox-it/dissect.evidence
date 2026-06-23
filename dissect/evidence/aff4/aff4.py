@@ -98,11 +98,7 @@ class AFF4:
         return segment
 
     def images(self) -> list[Image]:
-        """List all images in the AFF4 evidence.
-
-        An image is typed ``aff4:Image`` and is either contiguous (e.g. ``aff4:DiskImage``) or
-        sparse (``aff4:DiscontiguousImage``, e.g. APFS physical images).
-        """
+        """List all images in the AFF4 evidence."""
         return list(self.information.find("Image"))
 
     def files(self) -> list[FileImage]:

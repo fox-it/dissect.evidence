@@ -73,7 +73,6 @@ def test_aff4_exabyte_sparse() -> None:
 def test_aff4_discontiguous() -> None:
     aff4 = AFF4(absolute_path("_data/aff4/Base-Discontiguous.aff4"))
 
-    # A DiscontiguousImage is not a DiskImage, but it is an Image, so images() surfaces it.
     assert len(aff4.images()) == 1
 
     image = aff4.images()[0]
@@ -81,7 +80,6 @@ def test_aff4_discontiguous() -> None:
     assert image.size == 65536
     assert image.block_size == 4096
 
-    # The image maps onto a Map data stream backed by an lz4 bevy ImageStream.
     assert isinstance(image.data_stream, Map)
     assert image.data_stream.size == 65536
 
@@ -101,7 +99,6 @@ def test_aff4_discontiguous() -> None:
     assert hashlib.sha1(chunk).hexdigest() == "250cc926052d2c85c867ae6482b824464190a5fe"
     assert hashlib.md5(chunk).hexdigest() == "8bccb0aff9d7ac4a617e66d64af8ed5b"
 
-    # The ImageStream declares aff4:hash over its reconstructed content (SHA1, then MD5); they match.
     assert stream_obj.hash == [hashlib.sha1(chunk).hexdigest(), hashlib.md5(chunk).hexdigest()]
 
     # A read spanning the gap/data boundary stitches both together.
@@ -114,8 +111,6 @@ def test_aff4_apfs_container_image() -> None:
 
     image = aff4.images()[0]
 
-    # The bbt:APFSContainerImage type wins (longest MRO) so the object is the vendor subclass,
-    # while still being a DiscontiguousImage.
     assert isinstance(image, APFSContainerImage)
     assert isinstance(image, DiscontiguousImage)
 
