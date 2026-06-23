@@ -54,11 +54,18 @@ class MapStream(AlignedStream):
 
         idx = bisect_right(self._lookup, offset)
         while length > 0:
+            if idx >= len(self._lookup):
+                # Read extends past the last mapped region, fill the remainder with the gap stream.
+                self.default_gap_stream.seek(offset)
+                result.append(self.default_gap_stream.read(length))
+                break
+
             mapped_offset, mapped_length, target_offset, stream_idx = self.stream_map[self._lookup[idx]]
 
             if offset < mapped_offset:
                 # Hole
                 read_size = min(length, mapped_offset - offset)
+                self.default_gap_stream.seek(offset)
                 result.append(self.default_gap_stream.read(read_size))
             else:
                 offset_in_mapping = offset - mapped_offset
@@ -89,8 +96,12 @@ class SymbolicStream(AlignedStream):
         super().__init__(None)
 
     def _read(self, offset: int, length: int) -> bytes:
-        mult, rem = divmod(length, len(self.pattern))
-        return (self.pattern * mult) + self.pattern[:rem]
+        # The pattern is phased on the read offset (byte ``i`` is ``pattern[i % len]``)
+        plen = len(self.pattern)
+        start = offset % plen
+        end = start + length
+        mult = -(-end // plen)
+        return (self.pattern * mult)[start:end]
 
 
 class BevyStream(AlignedStream):

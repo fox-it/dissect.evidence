@@ -39,9 +39,9 @@ def test_aff4_allocated() -> None:
 
     # Test map stream boundaries
     stream.seek(17825792)
-    assert stream.read(518) == b"UNKNOWN" * 74
+    assert stream.read(518) == b"WNUNKNO" * (518 // 7)
     stream.seek(82836992)
-    assert stream.read(512) == (b"NKNOWNU" * (512 // 7)) + b"N"
+    assert stream.read(512) == (b"UNKNOWN" * (512 // 7)) + b"U"
     assert stream.read(8) == b"\x00" * 8
 
 
@@ -53,7 +53,7 @@ def test_aff4_read_error() -> None:
     stream = image.open()
 
     stream.seek(15728640)
-    assert stream.read(65536) == b"UNREADABLEDATA" * (65536 // 14) + b"UN"
+    assert stream.read(65536) == b"ADABLEDATAUNRE" * (65536 // 14) + b"AD"
 
 
 def test_aff4_exabyte_sparse() -> None:
