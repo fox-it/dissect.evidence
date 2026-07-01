@@ -15,7 +15,7 @@ from dissect.evidence.aff4.util import NS_AFF4, CompressionMethod
 if TYPE_CHECKING:
     from dissect.evidence.aff4.metadata import ImageStream, Information, Map
 
-CHUNK_CACHE_SIZE = int(os.getenv("DISSECT_AFF4_CHUNK_CACHE_SIZE", 512))
+CHUNK_CACHE_SIZE = int(os.getenv("DISSECT_AFF4_CHUNK_CACHE_SIZE", 32 * 1024))
 BEVY_CACHE_SIZE = int(os.getenv("DISSECT_AFF4_BEVY_CACHE_SIZE", 8))
 
 
