@@ -38,3 +38,6 @@ class ADCryptStream(AlignedStream):
         )
         cipher = AES.new(self.key, AES.MODE_CTR, counter=ctr)
         return cipher.decrypt(buf)
+
+    def close(self) -> None:
+        self.fh.close()
