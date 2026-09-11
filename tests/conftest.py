@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from io import BytesIO
-from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO
 
 import pytest
@@ -11,10 +10,11 @@ from tests._utils import absolute_path
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
 
 def open_data(name: str) -> Iterator[BinaryIO]:
-    with (Path(__file__).parent / name).open("rb") as fh:
+    with absolute_path(name).open("rb") as fh:
         yield fh
 
 
