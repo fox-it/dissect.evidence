@@ -3,8 +3,8 @@ from __future__ import annotations
 from dissect.cstruct import cstruct
 
 asdf_def = """
-flag FILE_FLAG : uint32 {
-    SHA256      = 0x01,
+flag FILE_FLAG : uint24 {
+    CHECKSUM      = 0x01
 };
 
 flag BLOCK_FLAG : uint8 {
@@ -12,9 +12,17 @@ flag BLOCK_FLAG : uint8 {
     COMPRESS    = 0x02,
 };
 
+enum CHECKSUM : uint8 {
+    SHA256 = 0x1,
+    SHA512 = 0x2,
+    NONE = 0xFF,
+};
+
+
 struct header {
     char        magic[4];       // File magic, must be "ASDF"
     FILE_FLAG   flags;          // File flags
+    CHECKSUM    checksum;       // Checksum used for the flags
     uint8       version;        // File version
     char        reserved1[7];   // Reserved
     uint64      timestamp;      // Creation timestamp of the file
@@ -45,7 +53,6 @@ struct footer {
     char        magic[4];       // Footer magic, must be "FT\\xa5\\xdf"
     char        reserved[4];    // Reserved
     uint64      table_offset;   // Offset in file to start of block table
-    char        sha256[32];     // SHA256 of this file up until this hash
 };
 """
 
