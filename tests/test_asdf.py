@@ -213,14 +213,14 @@ def test_asdf_stream_hashed() -> None:
 
 def test_asdf_stream_combined() -> None:
     fh = BytesIO()
-    stream = Crc32Stream(fh)
-    stream = CompressedStream(stream)
-    stream = HashedStream(stream)
+    block_stream = Crc32Stream(fh)
+    block_stream = CompressedStream(block_stream)
+    file_stream = HashedStream(block_stream)
 
-    stream.write(b"srt was here" * 100)
-    stream.finalize()
+    file_stream.write(b"srt was here" * 100)
+    block_stream.finalize()
 
-    assert stream.hexdigest() == "ba40ab3ee826d6aa0f085dfccbb72d8feefa72548015c4456c1fd741d0266a94"
+    assert file_stream.hexdigest() == "ba40ab3ee826d6aa0f085dfccbb72d8feefa72548015c4456c1fd741d0266a94"
     assert fh.getvalue() == bytes.fromhex("789c2b2e2a51284f2c56c8482d4a2d1e658fb247d9a3ec41cc06004445c530665f35fc")
 
 

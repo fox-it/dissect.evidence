@@ -90,6 +90,9 @@ class HashedStream(SubStreamBase):
         super().close()
         self.fh.close()
 
+    def finalize(self) -> None:
+        return
+
 
 class CompressedStream(SubStreamBase):
     """Compress data as it's being written.
