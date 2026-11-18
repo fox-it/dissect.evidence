@@ -10,6 +10,7 @@ from dissect.evidence.adcrypt.stream import ADCryptStream
 
 try:
     from Crypto.Cipher import AES, PKCS1_v1_5
+    from Crypto.Hash import SHA1
     from Crypto.Protocol.KDF import PBKDF2
     from Crypto.PublicKey import RSA
     from Crypto.Util import Counter
@@ -149,4 +150,4 @@ def adcrypt_kdf(
         if not (derived_salt := PKCS1_v1_5.new(rsa_key).decrypt(salt, sentinel=None, expected_pt_len=16)):
             raise ValueError("Failed to decrypt salt using provided private key")
 
-    return PBKDF2(passphrase_hash, derived_salt, key_len, count)
+    return PBKDF2(passphrase_hash, derived_salt, key_len, count, hmac_hash_module=SHA1)
