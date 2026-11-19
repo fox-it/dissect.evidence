@@ -215,14 +215,24 @@ class EWF:
 
         size_of_chunk = end_of_chunk - offset_of_chunk
 
-        # Uncompressed chunks have a 4 byte checksum at the end
-        if not compressed:
-            size_of_chunk -= 4
-
         segment.fh.seek(offset_of_chunk)
         buf = segment.fh.read(size_of_chunk)
+
         if compressed:
-            buf = zlib.decompress(buf)
+            # A chunk never decompresses to more than the chunk size
+            decompressor = zlib.decompressobj()
+            buf = decompressor.decompress(buf, self.chunk_size)
+            if decompressor.unconsumed_tail:
+                raise ValueError(f"Chunk {chunk} decompresses to more than the chunk size ({self.chunk_size} bytes)")
+            if not decompressor.eof:
+                raise ValueError(f"Chunk {chunk} is an incomplete or truncated compressed stream")
+        else:
+            # Uncompressed chunks have a 4 byte Adler-32 checksum at the end
+            if len(buf) < 4:
+                raise ValueError(f"Chunk {chunk} is too small to hold its checksum ({len(buf)} bytes)")
+            buf, checksum = buf[:-4], buf[-4:]
+            if zlib.adler32(buf) != int.from_bytes(checksum, "little"):
+                raise ValueError(f"Chunk {chunk} fails its Adler-32 checksum")
 
         return buf
 

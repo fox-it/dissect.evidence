@@ -145,3 +145,52 @@ def test_adcrypt_certificate(ewf_encrypted_certificate: BinaryIO) -> None:
     # FTK Imager strips our non-aligned footer...
     assert e.size == (4 * 1024 * 1024)
     _assert_pattern(e.open(), e.size)
+
+
+def test_ewf_damaged_stored_chunk(ewf_segmented: list[Path], tmp_path: Path) -> None:
+    """Test that a changed byte in an uncompressed chunk fails its Adler-32 checksum instead of being returned."""
+    copies = []
+    for path in ewf_segmented:
+        copy = tmp_path / path.name
+        copy.write_bytes(path.read_bytes())
+        copies.append(copy)
+
+    with ewf.EWF(copies) as container:
+        table = container.segment(0).tables[0]
+        offset = table.base_offset + (table.entries[0] & 0x7FFFFFFF)
+
+    data = bytearray(copies[0].read_bytes())
+    data[offset + 100] ^= 0xFF
+    copies[0].write_bytes(bytes(data))
+
+    with ewf.EWF(copies) as container, pytest.raises(ValueError, match="Chunk 0 fails its Adler-32 checksum"):
+        container.read_chunk(0)
+
+
+def test_ewf_chunk_decompresses_past_chunk_size(ewf_single: BinaryIO) -> None:
+    """Test that a compressed chunk is not decompressed past the chunk size."""
+    container = ewf.EWF(ewf_single)
+    container.chunk_size = 1024
+
+    with pytest.raises(ValueError, match="Chunk 0 decompresses to more than the chunk size"):
+        container.read_chunk(0)
+
+
+def test_ewf_truncated_compressed_chunk(ewf_single: BinaryIO) -> None:
+    """Test that a compressed chunk cut short is refused instead of returned partially."""
+    container = ewf.EWF(ewf_single)
+    table = container.segment(0).tables[0]
+    table.entries[1] -= 16  # chunk 0 now ends 16 bytes early
+
+    with pytest.raises(ValueError, match="Chunk 0 is an incomplete or truncated compressed stream"):
+        container.read_chunk(0)
+
+
+def test_ewf_stored_chunk_too_small(ewf_segmented: list[Path]) -> None:
+    """Test that an uncompressed chunk too small to hold its checksum is refused."""
+    with ewf.EWF(ewf_segmented) as container:
+        table = container.segment(0).tables[0]
+        table.entries[1] = table.entries[0] + 2  # chunk 0 is now 2 bytes long
+
+        with pytest.raises(ValueError, match="Chunk 0 is too small to hold its checksum"):
+            container.read_chunk(0)
